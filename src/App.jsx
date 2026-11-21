@@ -858,7 +858,7 @@ export default function App() {
 
                 {cart.length === 0 ? (
                   <p className="text-xs text-slate-400 py-6 text-center border border-dashed border-slate-200 rounded-xl">
-                    Toca un producto para agregarlo a la venta.
+                    Toca la variante con la talla y el color que deseas vender.
                   </p>
                 ) : (
                   <div className="space-y-2.5 max-h-60 lg:max-h-none lg:flex-1 overflow-y-auto pr-1">
@@ -870,6 +870,11 @@ export default function App() {
                         <div className="min-w-0">
                           <p className="text-xs font-semibold text-slate-900 truncate">
                             {item.variante.productos?.nombre}
+                          </p>
+                          <p className="text-[11px] text-slate-500 truncate">
+                            {[item.variante.talla, item.variante.color, item.variante.presentacion]
+                              .filter(Boolean)
+                              .join(' · ') || 'Variante estándar'}
                           </p>
                           <p className="text-[11px] text-slate-500">
                             {formatMoney(item.variante.precio_venta)} c/u

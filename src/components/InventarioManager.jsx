@@ -19,6 +19,8 @@ const formatMoney = (amount) =>
     minimumFractionDigits: 2
   }).format(Number(amount || 0))
 
+const createVariantRow = () => ({ talla: '', color: '', sku: '', stock_inicial: '' })
+
 export default function InventarioManager({ categorias, variantes, onInventoryUpdated }) {
   const [busqueda, setBusqueda] = useState('')
   const [soloStockBajo, setSoloStockBajo] = useState(false)
@@ -29,16 +31,13 @@ export default function InventarioManager({ categorias, variantes, onInventoryUp
     nombre: '',
     marca: '',
     categoria_id: categorias[0]?.id || '',
-    sku: '',
-    talla: '',
-    color: '',
     presentacion: '',
     fecha_vencimiento: '',
     precio_costo: '',
     precio_venta: '',
-    stock_inicial: '',
     stock_minimo: '3'
   })
+  const [newVariantRows, setNewVariantRows] = useState([createVariantRow()])
   const [newPhotoFile, setNewPhotoFile] = useState(null)
   const [newPhotoPreview, setNewPhotoPreview] = useState('')
   const [savingProd, setSavingProd] = useState(false)
@@ -58,6 +57,12 @@ export default function InventarioManager({ categorias, variantes, onInventoryUp
   const showToast = (type, message) => {
     setFeedback({ type, message })
     setTimeout(() => setFeedback(null), 4000)
+  }
+
+  const updateNewVariantRow = (index, changes) => {
+    setNewVariantRows((rows) =>
+      rows.map((row, rowIndex) => (rowIndex === index ? { ...row, ...changes } : row))
+    )
   }
 
   // Subir foto a Supabase Storage
@@ -84,6 +89,21 @@ export default function InventarioManager({ categorias, variantes, onInventoryUp
       return
     }
 
+    const variantKeys = newVariantRows.map((variant) =>
+      JSON.stringify([variant.talla.trim().toLowerCase(), variant.color.trim().toLowerCase()])
+    )
+    if (
+      newVariantRows.length > 1 &&
+      newVariantRows.some((variant) => !variant.talla.trim() && !variant.color.trim())
+    ) {
+      showToast('error', 'Cada variante debe tener una talla o un color.')
+      return
+    }
+    if (new Set(variantKeys).size !== variantKeys.length) {
+      showToast('error', 'No repitas la misma combinación de talla y color.')
+      return
+    }
+
     setSavingProd(true)
     try {
       let imagenUrl = null
@@ -105,55 +125,53 @@ export default function InventarioManager({ categorias, variantes, onInventoryUp
 
       if (prodError) throw prodError
 
-      const initialStock = parseInt(newProd.stock_inicial || '0', 10) || 0
-
       const { data: varData, error: varError } = await supabase
         .from('variantes')
-        .insert([
-          {
+        .insert(
+          newVariantRows.map((variant) => ({
             producto_id: prodData.id,
-            sku: newProd.sku.trim() || null,
-            talla: newProd.talla.trim() || null,
-            color: newProd.color.trim() || null,
+            sku: variant.sku.trim() || null,
+            talla: variant.talla.trim() || null,
+            color: variant.color.trim() || null,
             presentacion: newProd.presentacion.trim() || null,
             fecha_vencimiento: newProd.fecha_vencimiento || null,
             precio_costo: parseFloat(newProd.precio_costo || '0') || 0,
             precio_venta: parseFloat(newProd.precio_venta || '0') || 0,
-            stock_actual: initialStock,
+            stock_actual: parseInt(variant.stock_inicial || '0', 10) || 0,
             stock_minimo: parseInt(newProd.stock_minimo || '3', 10) || 3,
             imagen_url: imagenUrl
-          }
-        ])
+          }))
+        )
         .select()
-        .single()
 
       if (varError) throw varError
 
-      if (initialStock > 0) {
-        await supabase.from('movimientos_inventario').insert([
-          {
-            variante_id: varData.id,
-            tipo: 'Entrada',
-            cantidad: initialStock,
-            motivo: 'Inventario inicial'
-          }
-        ])
+      const initialMovements = varData
+        .filter((variant) => Number(variant.stock_actual) > 0)
+        .map((variant) => ({
+          variante_id: variant.id,
+          tipo: 'Entrada',
+          cantidad: variant.stock_actual,
+          motivo: 'Inventario inicial'
+        }))
+      if (initialMovements.length > 0) {
+        const { error: movementsError } = await supabase
+          .from('movimientos_inventario')
+          .insert(initialMovements)
+        if (movementsError) throw movementsError
       }
 
       setNewProd({
         nombre: '',
         marca: '',
         categoria_id: categorias[0]?.id || '',
-        sku: '',
-        talla: '',
-        color: '',
         presentacion: '',
         fecha_vencimiento: '',
         precio_costo: '',
         precio_venta: '',
-        stock_inicial: '',
         stock_minimo: '3'
       })
+      setNewVariantRows([createVariantRow()])
       setNewPhotoFile(null)
       setNewPhotoPreview('')
 
@@ -430,37 +448,15 @@ export default function InventarioManager({ categorias, variantes, onInventoryUp
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-2">
-            <div>
-              <label className="block text-[11px] text-slate-600 mb-1">Talla</label>
-              <input
-                type="text"
-                value={newProd.talla}
-                onChange={(e) => setNewProd({ ...newProd, talla: e.target.value })}
-                placeholder="S, M, L"
-                className="w-full rounded-xl border border-slate-200 px-2.5 py-2 text-xs"
-              />
-            </div>
-            <div>
-              <label className="block text-[11px] text-slate-600 mb-1">Color</label>
-              <input
-                type="text"
-                value={newProd.color}
-                onChange={(e) => setNewProd({ ...newProd, color: e.target.value })}
-                placeholder="Negro, Rosa"
-                className="w-full rounded-xl border border-slate-200 px-2.5 py-2 text-xs"
-              />
-            </div>
-            <div>
-              <label className="block text-[11px] text-slate-600 mb-1">Presentación</label>
-              <input
-                type="text"
-                value={newProd.presentacion}
-                onChange={(e) => setNewProd({ ...newProd, presentacion: e.target.value })}
-                placeholder="100ml, 50g"
-                className="w-full rounded-xl border border-slate-200 px-2.5 py-2 text-xs"
-              />
-            </div>
+          <div>
+            <label className="block text-[11px] text-slate-600 mb-1">Presentación</label>
+            <input
+              type="text"
+              value={newProd.presentacion}
+              onChange={(e) => setNewProd({ ...newProd, presentacion: e.target.value })}
+              placeholder="100ml, 50g (opcional)"
+              className="w-full rounded-xl border border-slate-200 px-2.5 py-2 text-xs"
+            />
           </div>
 
           <div className="grid grid-cols-2 gap-2.5">
@@ -493,40 +489,90 @@ export default function InventarioManager({ categorias, variantes, onInventoryUp
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-2.5">
-            <div>
-              <label className="block text-xs font-medium text-slate-700 mb-1">Stock inicial</label>
-              <input
-                type="number"
-                min="0"
-                value={newProd.stock_inicial}
-                onChange={(e) => setNewProd({ ...newProd, stock_inicial: e.target.value })}
-                placeholder="0"
-                className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
-              />
+          <div>
+            <div className="flex items-center justify-between gap-2 mb-2">
+              <div>
+                <p className="text-xs font-semibold text-slate-800">Tallas y colores</p>
+                <p className="text-[11px] text-slate-500">Agrega una fila por cada combinación y su stock.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setNewVariantRows([...newVariantRows, createVariantRow()])}
+                className="shrink-0 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 px-2.5 py-1.5 text-[11px] font-semibold flex items-center gap-1 cursor-pointer"
+              >
+                <PlusCircle className="w-3.5 h-3.5" />
+                Agregar
+              </button>
             </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-700 mb-1">
-                Vencimiento
-              </label>
-              <input
-                type="date"
-                value={newProd.fecha_vencimiento}
-                onChange={(e) =>
-                  setNewProd({ ...newProd, fecha_vencimiento: e.target.value })
-                }
-                className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
-              />
+            <div className="space-y-2">
+              {newVariantRows.map((variant, index) => (
+                <div
+                  key={index}
+                  className="rounded-xl border border-slate-200 bg-slate-50 p-2.5 space-y-2"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-semibold text-slate-600">Variante {index + 1}</span>
+                    {newVariantRows.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setNewVariantRows(newVariantRows.filter((_, rowIndex) => rowIndex !== index))
+                        }
+                        className="p-1 text-slate-400 hover:text-red-600 cursor-pointer"
+                        aria-label={`Quitar variante ${index + 1}`}
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <input
+                      type="text"
+                      value={variant.talla}
+                      onChange={(e) => updateNewVariantRow(index, { talla: e.target.value })}
+                      placeholder="Talla (S, M, L)"
+                      aria-label={`Talla de variante ${index + 1}`}
+                      className="w-full rounded-lg border border-slate-200 px-2.5 py-2 text-xs bg-white"
+                    />
+                    <input
+                      type="text"
+                      value={variant.color}
+                      onChange={(e) => updateNewVariantRow(index, { color: e.target.value })}
+                      placeholder="Color"
+                      aria-label={`Color de variante ${index + 1}`}
+                      className="w-full rounded-lg border border-slate-200 px-2.5 py-2 text-xs bg-white"
+                    />
+                    <input
+                      type="text"
+                      value={variant.sku}
+                      onChange={(e) => updateNewVariantRow(index, { sku: e.target.value })}
+                      placeholder="SKU / Código"
+                      aria-label={`Código de variante ${index + 1}`}
+                      className="w-full rounded-lg border border-slate-200 px-2.5 py-2 text-xs bg-white"
+                    />
+                    <input
+                      type="number"
+                      min="0"
+                      value={variant.stock_inicial}
+                      onChange={(e) =>
+                        updateNewVariantRow(index, { stock_inicial: e.target.value })
+                      }
+                      placeholder="Stock inicial"
+                      aria-label={`Stock inicial de variante ${index + 1}`}
+                      className="w-full rounded-lg border border-slate-200 px-2.5 py-2 text-xs bg-white"
+                    />
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-slate-700 mb-1">SKU / Código</label>
+            <label className="block text-xs font-medium text-slate-700 mb-1">Vencimiento</label>
             <input
-              type="text"
-              value={newProd.sku}
-              onChange={(e) => setNewProd({ ...newProd, sku: e.target.value })}
-              placeholder="Opcional"
+              type="date"
+              value={newProd.fecha_vencimiento}
+              onChange={(e) => setNewProd({ ...newProd, fecha_vencimiento: e.target.value })}
               className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
             />
           </div>
