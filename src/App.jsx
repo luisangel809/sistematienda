@@ -29,6 +29,110 @@ const formatMoney = (amount) =>
     minimumFractionDigits: 2
   }).format(Number(amount || 0))
 
+function ProductVariantCard({ product, variants, addToCart }) {
+  const firstVariant = variants.find((variant) => Number(variant.stock_actual) > 0) || variants[0]
+  const [selectedTalla, setSelectedTalla] = useState(firstVariant.talla || '')
+  const [selectedColor, setSelectedColor] = useState(firstVariant.color || '')
+  const tallas = [...new Set(variants.map((variant) => variant.talla || ''))]
+  const hasTallas = variants.some((variant) => variant.talla)
+  const hasColors = variants.some((variant) => variant.color)
+  const talla = tallas.includes(selectedTalla) ? selectedTalla : tallas[0]
+  const variantsForTalla = variants.filter((variant) => (variant.talla || '') === talla)
+  const colores = [...new Set(variantsForTalla.map((variant) => variant.color || ''))]
+  const color = colores.includes(selectedColor) ? selectedColor : colores[0]
+  const selectedVariant =
+    variantsForTalla.find((variant) => (variant.color || '') === color) || variants[0]
+  const lowStock =
+    Number(selectedVariant.stock_actual || 0) <= Number(selectedVariant.stock_minimo || 3)
+
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200 p-4 flex flex-col gap-3">
+      {selectedVariant.imagen_url && (
+        <img
+          src={selectedVariant.imagen_url}
+          alt={product?.nombre}
+          className="w-full h-28 object-cover rounded-xl border border-slate-100"
+        />
+      )}
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <span className="text-[11px] font-medium text-rose-600 bg-rose-50 px-2 py-0.5 rounded-md">
+            {product?.categorias?.nombre || 'General'}
+          </span>
+          <h3 className="font-semibold text-sm text-slate-900 mt-2">{product?.nombre}</h3>
+        </div>
+        <span
+          className={`shrink-0 text-[11px] font-semibold px-2 py-0.5 rounded-md ${
+            Number(selectedVariant.stock_actual || 0) <= 0
+              ? 'bg-red-100 text-red-700'
+              : lowStock
+              ? 'bg-amber-100 text-amber-800'
+              : 'bg-slate-100 text-slate-700'
+          }`}
+        >
+          Stock: {selectedVariant.stock_actual}
+        </span>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        {hasTallas && (
+          <label className="text-[11px] font-medium text-slate-600">
+            Talla
+            <select
+              value={talla}
+              onChange={(event) => {
+                const nextTalla = event.target.value
+                const nextVariants = variants.filter(
+                  (variant) => (variant.talla || '') === nextTalla
+                )
+                setSelectedTalla(nextTalla)
+                setSelectedColor(nextVariants[0]?.color || '')
+              }}
+              className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-sm text-slate-900"
+            >
+              {tallas.map((value) => (
+                <option key={value || 'sin-talla'} value={value}>
+                  {value || 'Sin talla'}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        {hasColors && (
+          <label className="text-[11px] font-medium text-slate-600">
+            Color
+            <select
+              value={color}
+              onChange={(event) => setSelectedColor(event.target.value)}
+              className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-sm text-slate-900"
+            >
+              {colores.map((value) => (
+                <option key={value || 'sin-color'} value={value}>
+                  {value || 'Sin color'}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+      </div>
+
+      <div className="flex items-center justify-between border-t border-slate-100 pt-2">
+        <span className="font-bold text-base text-slate-900">
+          {formatMoney(selectedVariant.precio_venta)}
+        </span>
+        <button
+          type="button"
+          onClick={() => addToCart(selectedVariant)}
+          disabled={Number(selectedVariant.stock_actual || 0) <= 0}
+          className="rounded-lg bg-rose-50 hover:bg-rose-100 disabled:bg-slate-100 disabled:text-slate-400 text-rose-600 px-3 py-2 text-xs font-semibold cursor-pointer disabled:cursor-not-allowed"
+        >
+          {Number(selectedVariant.stock_actual || 0) <= 0 ? 'Agotado' : 'Agregar al carrito'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 export default function App() {
   const [session, setSession] = useState(null)
   const [loadingAuth, setLoadingAuth] = useState(true)
@@ -231,27 +335,41 @@ export default function App() {
     setShowClienteSuggestions(false)
   }
 
-  // Filtered variants
-  const filteredVariantes = useMemo(() => {
-    return variantes.filter((v) => {
+  // Filter products while keeping all their variants available in the POS selectors.
+  const catalogProducts = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase()
+    const products = new Map()
+
+    variantes.forEach((v) => {
       const catId = v.productos?.categoria_id
       const matchesCat = selectedCategoria === 'ALL' || catId === selectedCategoria
-      const q = searchQuery.trim().toLowerCase()
-      if (!q) return matchesCat
-      const haystack = [
-        v.productos?.nombre,
-        v.productos?.marca,
-        v.productos?.categorias?.nombre,
-        v.sku,
-        v.talla,
-        v.color,
-        v.presentacion
-      ]
-        .filter(Boolean)
-        .join(' ')
-        .toLowerCase()
-      return matchesCat && haystack.includes(q)
+      if (!matchesCat) return
+
+      const productId = v.producto_id || v.productos?.id || v.id
+      if (!products.has(productId)) {
+        products.set(productId, { id: productId, product: v.productos, variants: [] })
+      }
+      products.get(productId).variants.push(v)
     })
+
+    return [...products.values()].filter(({ variants: productVariants }) =>
+      !q ||
+      productVariants.some((v) =>
+        [
+          v.productos?.nombre,
+          v.productos?.marca,
+          v.productos?.categorias?.nombre,
+          v.sku,
+          v.talla,
+          v.color,
+          v.presentacion
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase()
+          .includes(q)
+      )
+    )
   }, [variantes, selectedCategoria, searchQuery])
 
   // Cart helpers
@@ -783,64 +901,77 @@ export default function App() {
 
               {loadingData ? (
                 <p className="text-sm text-slate-500 py-8 text-center">Cargando catálogo...</p>
-              ) : filteredVariantes.length === 0 ? (
+              ) : catalogProducts.length === 0 ? (
                 <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center text-sm text-slate-500">
                   No hay variantes que coincidan. Ve a la pestaña <strong>Inventario</strong> para agregar productos.
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {filteredVariantes.map((v) => {
-                    const specs = [v.talla, v.color, v.presentacion].filter(Boolean).join(' · ')
-                    const lowStock = (v.stock_actual || 0) <= (v.stock_minimo || 3)
-                    return (
-                      <button
-                        key={v.id}
-                        onClick={() => addToCart(v)}
-                        className="text-left bg-white rounded-2xl border border-slate-200 hover:border-rose-400 active:scale-[0.99] p-4 transition flex flex-col justify-between gap-3 cursor-pointer"
-                      >
-                        <div>
-                          {v.imagen_url && (
-                            <img
-                              src={v.imagen_url}
-                              alt={v.productos?.nombre}
-                              className="w-full h-28 object-cover rounded-xl mb-2.5 border border-slate-100"
-                            />
-                          )}
-                          <div className="flex items-start justify-between gap-2">
-                            <span className="text-[11px] font-medium text-rose-600 bg-rose-50 px-2 py-0.5 rounded-md">
-                              {v.productos?.categorias?.nombre || 'General'}
-                            </span>
-                            <span
-                              className={`text-[11px] font-semibold px-2 py-0.5 rounded-md ${
-                                (v.stock_actual || 0) <= 0
-                                  ? 'bg-red-100 text-red-700'
-                                  : lowStock
-                                  ? 'bg-amber-100 text-amber-800'
-                                  : 'bg-slate-100 text-slate-700'
-                              }`}
-                            >
-                              Stock: {v.stock_actual}
-                            </span>
-                          </div>
-                          <h3 className="font-semibold text-sm text-slate-900 mt-2">
-                            {v.productos?.nombre}
-                          </h3>
-                          {specs && <p className="text-xs text-slate-500 mt-0.5">{specs}</p>}
-                          {v.fecha_vencimiento && (
-                            <p className="text-[11px] text-amber-700 mt-1">
-                              Vence: {v.fecha_vencimiento}
-                            </p>
-                          )}
-                        </div>
+                  {catalogProducts.map((group) => {
+                    if (group.variants.some((variant) => variant.talla || variant.color)) {
+                      return (
+                        <ProductVariantCard
+                          key={group.id}
+                          product={group.product}
+                          variants={group.variants}
+                          addToCart={addToCart}
+                        />
+                      )
+                    }
 
-                        <div className="flex items-center justify-between pt-2 border-t border-slate-100">
-                          <span className="font-bold text-base text-slate-900">
-                            {formatMoney(v.precio_venta)}
-                          </span>
-                          <span className="text-xs font-semibold text-rose-600">+ Agregar</span>
-                        </div>
-                      </button>
-                    )
+                    return group.variants.map((v) => {
+                      const specs = [v.talla, v.color, v.presentacion].filter(Boolean).join(' · ')
+                      const lowStock = (v.stock_actual || 0) <= (v.stock_minimo || 3)
+                      return (
+                        <button
+                          key={v.id}
+                          onClick={() => addToCart(v)}
+                          className="text-left bg-white rounded-2xl border border-slate-200 hover:border-rose-400 active:scale-[0.99] p-4 transition flex flex-col justify-between gap-3 cursor-pointer"
+                        >
+                          <div>
+                            {v.imagen_url && (
+                              <img
+                                src={v.imagen_url}
+                                alt={v.productos?.nombre}
+                                className="w-full h-28 object-cover rounded-xl mb-2.5 border border-slate-100"
+                              />
+                            )}
+                            <div className="flex items-start justify-between gap-2">
+                              <span className="text-[11px] font-medium text-rose-600 bg-rose-50 px-2 py-0.5 rounded-md">
+                                {v.productos?.categorias?.nombre || 'General'}
+                              </span>
+                              <span
+                                className={`text-[11px] font-semibold px-2 py-0.5 rounded-md ${
+                                  (v.stock_actual || 0) <= 0
+                                    ? 'bg-red-100 text-red-700'
+                                    : lowStock
+                                    ? 'bg-amber-100 text-amber-800'
+                                    : 'bg-slate-100 text-slate-700'
+                                }`}
+                              >
+                                Stock: {v.stock_actual}
+                              </span>
+                            </div>
+                            <h3 className="font-semibold text-sm text-slate-900 mt-2">
+                              {v.productos?.nombre}
+                            </h3>
+                            {specs && <p className="text-xs text-slate-500 mt-0.5">{specs}</p>}
+                            {v.fecha_vencimiento && (
+                              <p className="text-[11px] text-amber-700 mt-1">
+                                Vence: {v.fecha_vencimiento}
+                              </p>
+                            )}
+                          </div>
+
+                          <div className="flex items-center justify-between pt-2 border-t border-slate-100">
+                            <span className="font-bold text-base text-slate-900">
+                              {formatMoney(v.precio_venta)}
+                            </span>
+                            <span className="text-xs font-semibold text-rose-600">+ Agregar</span>
+                          </div>
+                        </button>
+                      )
+                    })
                   })}
                 </div>
               )}
@@ -858,7 +989,7 @@ export default function App() {
 
                 {cart.length === 0 ? (
                   <p className="text-xs text-slate-400 py-6 text-center border border-dashed border-slate-200 rounded-xl">
-                    Toca la variante con la talla y el color que deseas vender.
+                    Elige la talla y el color, y pulsa “Agregar al carrito”.
                   </p>
                 ) : (
                   <div className="space-y-2.5 max-h-60 lg:max-h-none lg:flex-1 overflow-y-auto pr-1">
