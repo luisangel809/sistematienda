@@ -23,6 +23,7 @@ const createVariantRow = () => ({ talla: '', color: '', sku: '', stock_inicial: 
 
 export default function InventarioManager({ categorias, variantes, onInventoryUpdated }) {
   const [busqueda, setBusqueda] = useState('')
+  const [categoriaFiltro, setCategoriaFiltro] = useState('ALL')
   const [soloStockBajo, setSoloStockBajo] = useState(false)
   const [feedback, setFeedback] = useState(null)
 
@@ -423,6 +424,9 @@ export default function InventarioManager({ categorias, variantes, onInventoryUp
     return variantes.filter((v) => {
       const lowStock = (v.stock_actual || 0) <= (v.stock_minimo || 3)
       if (soloStockBajo && !lowStock) return false
+      if (categoriaFiltro !== 'ALL' && v.productos?.categoria_id !== categoriaFiltro) {
+        return false
+      }
 
       const q = busqueda.trim().toLowerCase()
       if (!q) return true
@@ -440,7 +444,7 @@ export default function InventarioManager({ categorias, variantes, onInventoryUp
         .toLowerCase()
       return text.includes(q)
     })
-  }, [variantes, busqueda, soloStockBajo])
+  }, [variantes, busqueda, soloStockBajo, categoriaFiltro])
 
   const productosAgrupados = useMemo(() => {
     const products = new Map()
@@ -742,15 +746,30 @@ export default function InventarioManager({ categorias, variantes, onInventoryUp
             </label>
           </div>
 
-          <div className="relative">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
-            <input
-              type="text"
-              value={busqueda}
-              onChange={(e) => setBusqueda(e.target.value)}
-              placeholder="Filtrar inventario por nombre, marca, talla, color o SKU..."
-              className="w-full rounded-xl bg-white border border-slate-200 pl-10 pr-4 py-2 text-sm"
-            />
+          <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_220px] gap-2">
+            <div className="relative">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+              <input
+                type="text"
+                value={busqueda}
+                onChange={(e) => setBusqueda(e.target.value)}
+                placeholder="Filtrar inventario por nombre, marca, talla, color o SKU..."
+                className="w-full rounded-xl bg-white border border-slate-200 pl-10 pr-4 py-2 text-sm"
+              />
+            </div>
+            <select
+              value={categoriaFiltro}
+              onChange={(e) => setCategoriaFiltro(e.target.value)}
+              aria-label="Filtrar inventario por categoría"
+              className="w-full rounded-xl bg-white border border-slate-200 px-3 py-2 text-sm"
+            >
+              <option value="ALL">Todas las categorías</option>
+              {categorias.map((categoria) => (
+                <option key={categoria.id} value={categoria.id}>
+                  {categoria.nombre}
+                </option>
+              ))}
+            </select>
           </div>
 
           <div className="space-y-3">
