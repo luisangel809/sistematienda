@@ -41,6 +41,16 @@ export default function InventarioManager({ categorias, variantes, onInventoryUp
   const [newPhotoFile, setNewPhotoFile] = useState(null)
   const [newPhotoPreview, setNewPhotoPreview] = useState('')
   const [savingProd, setSavingProd] = useState(false)
+  const [addingVariantProduct, setAddingVariantProduct] = useState(null)
+  const [variantDraft, setVariantDraft] = useState({
+    talla: '',
+    color: '',
+    sku: '',
+    stock_inicial: '',
+    precio_costo: '',
+    precio_venta: ''
+  })
+  const [savingVariant, setSavingVariant] = useState(false)
 
   // Estado Modal Edición
   const [editingVar, setEditingVar] = useState(null)
@@ -63,6 +73,23 @@ export default function InventarioManager({ categorias, variantes, onInventoryUp
     setNewVariantRows((rows) =>
       rows.map((row, rowIndex) => (rowIndex === index ? { ...row, ...changes } : row))
     )
+  }
+
+  const openAddVariantModal = (group) => {
+    const baseVariant = group.variantes[0]
+    setAddingVariantProduct({
+      id: group.id,
+      nombre: group.producto?.nombre,
+      baseVariant
+    })
+    setVariantDraft({
+      talla: '',
+      color: '',
+      sku: '',
+      stock_inicial: '',
+      precio_costo: String(baseVariant.precio_costo ?? ''),
+      precio_venta: String(baseVariant.precio_venta ?? '')
+    })
   }
 
   // Subir foto a Supabase Storage
@@ -181,6 +208,81 @@ export default function InventarioManager({ categorias, variantes, onInventoryUp
       showToast('error', err.message || 'Error al guardar el producto.')
     } finally {
       setSavingProd(false)
+    }
+  }
+
+  const handleAddVariant = async (e) => {
+    e.preventDefault()
+    if (!addingVariantProduct) return
+    if (!variantDraft.talla.trim() && !variantDraft.color.trim()) {
+      showToast('error', 'Ingresa una talla o un color para la nueva variante.')
+      return
+    }
+
+    const combination = JSON.stringify([
+      variantDraft.talla.trim().toLowerCase(),
+      variantDraft.color.trim().toLowerCase()
+    ])
+    const alreadyExists = variantes.some(
+      (variant) =>
+        variant.producto_id === addingVariantProduct.id &&
+        JSON.stringify([
+          (variant.talla || '').trim().toLowerCase(),
+          (variant.color || '').trim().toLowerCase()
+        ]) === combination
+    )
+    if (alreadyExists) {
+      showToast('error', 'Esta combinación de talla y color ya existe en el producto.')
+      return
+    }
+
+    setSavingVariant(true)
+    try {
+      const baseVariant = addingVariantProduct.baseVariant
+      const initialStock = parseInt(variantDraft.stock_inicial || '0', 10) || 0
+      const { data: variant, error: variantError } = await supabase
+        .from('variantes')
+        .insert([
+          {
+            producto_id: addingVariantProduct.id,
+            sku: variantDraft.sku.trim() || null,
+            talla: variantDraft.talla.trim() || null,
+            color: variantDraft.color.trim() || null,
+            presentacion: baseVariant.presentacion || null,
+            fecha_vencimiento: baseVariant.fecha_vencimiento || null,
+            precio_costo: parseFloat(variantDraft.precio_costo || '0') || 0,
+            precio_venta: parseFloat(variantDraft.precio_venta || '0') || 0,
+            stock_actual: initialStock,
+            stock_minimo: baseVariant.stock_minimo || 3,
+            imagen_url: baseVariant.imagen_url || null
+          }
+        ])
+        .select()
+        .single()
+
+      if (variantError) throw variantError
+
+      if (initialStock > 0) {
+        const { error: movementError } = await supabase
+          .from('movimientos_inventario')
+          .insert([
+            {
+              variante_id: variant.id,
+              tipo: 'Entrada',
+              cantidad: initialStock,
+              motivo: 'Inventario inicial de variante'
+            }
+          ])
+        if (movementError) throw movementError
+      }
+
+      setAddingVariantProduct(null)
+      await onInventoryUpdated()
+      showToast('success', 'Variante agregada al producto.')
+    } catch (err) {
+      showToast('error', err.message || 'No se pudo agregar la variante.')
+    } finally {
+      setSavingVariant(false)
     }
   }
 
@@ -340,6 +442,39 @@ export default function InventarioManager({ categorias, variantes, onInventoryUp
     })
   }, [variantes, busqueda, soloStockBajo])
 
+  const productosAgrupados = useMemo(() => {
+    const products = new Map()
+    variantesFiltradas.forEach((variant) => {
+      const productId = variant.producto_id || variant.productos?.id || variant.id
+      if (!products.has(productId)) {
+        products.set(productId, {
+          id: productId,
+          producto: variant.productos,
+          variantes: []
+        })
+      }
+      products.get(productId).variantes.push(variant)
+    })
+    return [...products.values()]
+  }, [variantesFiltradas])
+
+  const variantesModalStock = stockModalVar
+    ? variantes.filter(
+        (variant) =>
+          (variant.producto_id || variant.productos?.id) ===
+          (stockModalVar.producto_id || stockModalVar.productos?.id)
+      )
+    : []
+  const tallasModalStock = [...new Set(variantesModalStock.map((variant) => variant.talla || ''))]
+  const variantesDeTallaModal = variantesModalStock.filter(
+    (variant) => (variant.talla || '') === (stockModalVar?.talla || '')
+  )
+  const coloresModalStock = [
+    ...new Set(variantesDeTallaModal.map((variant) => variant.color || ''))
+  ]
+  const tieneTallasModalStock = variantesModalStock.some((variant) => variant.talla)
+  const tieneColoresModalStock = variantesModalStock.some((variant) => variant.color)
+
   return (
     <div className="space-y-4">
       {feedback && (
@@ -493,7 +628,9 @@ export default function InventarioManager({ categorias, variantes, onInventoryUp
             <div className="flex items-center justify-between gap-2 mb-2">
               <div>
                 <p className="text-xs font-semibold text-slate-800">Tallas y colores</p>
-                <p className="text-[11px] text-slate-500">Agrega una fila por cada combinación y su stock.</p>
+                <p className="text-[11px] text-slate-500">
+                  Cada fila se guarda como variante de este mismo producto.
+                </p>
               </div>
               <button
                 type="button"
@@ -590,7 +727,8 @@ export default function InventarioManager({ categorias, variantes, onInventoryUp
         <div className="lg:col-span-7 space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 className="font-bold text-base">
-              Existencias actuales ({variantesFiltradas.length})
+              Existencias actuales ({productosAgrupados.length} productos · {variantesFiltradas.length}{' '}
+              variantes)
             </h2>
 
             <label className="inline-flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer select-none">
@@ -615,98 +753,137 @@ export default function InventarioManager({ categorias, variantes, onInventoryUp
             />
           </div>
 
-          <div className="bg-white rounded-2xl border border-slate-200 divide-y divide-slate-100">
+          <div className="space-y-3">
             {variantesFiltradas.length === 0 ? (
-              <p className="p-6 text-center text-sm text-slate-500">
+              <p className="bg-white rounded-2xl border border-slate-200 p-6 text-center text-sm text-slate-500">
                 No hay artículos que coincidan con el filtro.
               </p>
             ) : (
-              variantesFiltradas.map((v) => {
-                const specs = [v.talla, v.color, v.presentacion].filter(Boolean).join(' · ')
-                const lowStock = (v.stock_actual || 0) <= (v.stock_minimo || 3)
-
+              productosAgrupados.map((group) => {
+                const firstVariant = group.variantes[0]
+                const stockTotal = group.variantes.reduce(
+                  (total, variant) => total + Number(variant.stock_actual || 0),
+                  0
+                )
                 return (
-                  <div
-                    key={v.id}
-                    className="p-3.5 flex flex-wrap sm:flex-nowrap items-center justify-between gap-3 hover:bg-slate-50"
+                  <section
+                    key={group.id}
+                    className="bg-white rounded-2xl border border-slate-200 overflow-hidden"
                   >
-                    <div className="flex items-center gap-3 min-w-0">
-                      {v.imagen_url ? (
-                        <img
-                          src={v.imagen_url}
-                          alt={v.productos?.nombre}
-                          className="w-12 h-12 rounded-xl object-cover border border-slate-200 shrink-0"
-                        />
-                      ) : (
-                        <div className="w-12 h-12 rounded-xl bg-slate-100 text-slate-400 flex items-center justify-center shrink-0">
-                          <Package className="w-5 h-5" />
+                    <div className="p-3.5 flex items-center justify-between gap-3 bg-slate-50/70">
+                      <div className="flex items-center gap-3 min-w-0">
+                        {firstVariant.imagen_url ? (
+                          <img
+                            src={firstVariant.imagen_url}
+                            alt={group.producto?.nombre}
+                            className="w-12 h-12 rounded-xl object-cover border border-slate-200 shrink-0"
+                          />
+                        ) : (
+                          <div className="w-12 h-12 rounded-xl bg-slate-100 text-slate-400 flex items-center justify-center shrink-0">
+                            <Package className="w-5 h-5" />
+                          </div>
+                        )}
+                        <div className="min-w-0">
+                          <p className="font-semibold text-sm text-slate-900 truncate">
+                            {group.producto?.nombre}
+                          </p>
+                          <p className="text-xs text-slate-500 truncate">
+                            {group.producto?.categorias?.nombre || 'Sin categoría'}
+                            {group.producto?.marca ? ` · ${group.producto.marca}` : ''}
+                          </p>
                         </div>
-                      )}
-
-                      <div className="min-w-0">
-                        <p className="font-semibold text-sm text-slate-900 truncate">
-                          {v.productos?.nombre}
-                        </p>
-                        <p className="text-xs text-slate-500 truncate">
-                          {v.productos?.categorias?.nombre || 'Sin categoría'}
-                          {specs ? ` · ${specs}` : ''}
-                          {v.sku ? ` · SKU: ${v.sku}` : ''}
-                        </p>
-                        <div className="flex items-center gap-2 mt-1">
-                          <span className="font-bold text-xs text-slate-900">
-                            Venta: {formatMoney(v.precio_venta)}
-                          </span>
-                          <span className="text-[11px] text-slate-400">
-                            Costo: {formatMoney(v.precio_costo)}
-                          </span>
-                          <span
-                            className={`inline-flex items-center gap-1 text-xs font-semibold ${
-                              lowStock ? 'text-amber-700' : 'text-emerald-700'
-                            }`}
-                          >
-                            {lowStock && <AlertTriangle className="w-3.5 h-3.5" />}
-                            {v.stock_actual} und.
-                          </span>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <div className="text-right">
+                          <p className="text-xs font-semibold text-slate-700">
+                            {group.variantes.length} variante{group.variantes.length === 1 ? '' : 's'}
+                          </p>
+                          <p className="text-[11px] text-slate-500">Stock total: {stockTotal}</p>
                         </div>
+                        <button
+                          type="button"
+                          onClick={() => openAddVariantModal(group)}
+                          className="rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 px-2.5 py-2 text-[11px] font-semibold flex items-center gap-1 cursor-pointer"
+                          title={`Agregar talla o color a ${group.producto?.nombre}`}
+                        >
+                          <PlusCircle className="w-3.5 h-3.5" />
+                          Agregar variante
+                        </button>
                       </div>
                     </div>
 
-                    {/* Botones de acción */}
-                    <div className="flex items-center gap-1.5 shrink-0 ml-auto">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setStockModalVar(v)
-                          setStockDelta('')
-                          setStockMotivo('Reabastecimiento de mercancía')
-                        }}
-                        className="px-2.5 py-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-semibold flex items-center gap-1 cursor-pointer"
-                        title="Sumar o ajustar stock"
-                      >
-                        <PlusCircle className="w-3.5 h-3.5" />
-                        Stock
-                      </button>
+                    <div className="divide-y divide-slate-100">
+                      {group.variantes.map((v) => {
+                        const specs = [
+                          v.talla ? `Talla: ${v.talla}` : null,
+                          v.color ? `Color: ${v.color}` : null,
+                          v.presentacion
+                        ]
+                          .filter(Boolean)
+                          .join(' · ') || 'Variante estándar'
+                        const lowStock = (v.stock_actual || 0) <= (v.stock_minimo || 3)
 
-                      <button
-                        type="button"
-                        onClick={() => openEditModal(v)}
-                        className="px-2.5 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-semibold flex items-center gap-1 cursor-pointer"
-                        title="Editar producto, precio o foto"
-                      >
-                        <Pencil className="w-3.5 h-3.5" />
-                        Editar
-                      </button>
+                        return (
+                          <div
+                            key={v.id}
+                            className="p-3.5 flex flex-wrap sm:flex-nowrap items-center justify-between gap-3 hover:bg-slate-50"
+                          >
+                            <div className="min-w-0">
+                              <p className="font-semibold text-sm text-slate-900">{specs}</p>
+                              <p className="text-xs text-slate-500 truncate">
+                                {v.sku ? `SKU: ${v.sku} · ` : ''}
+                                Venta: {formatMoney(v.precio_venta)} · Costo:{' '}
+                                {formatMoney(v.precio_costo)}
+                              </p>
+                              <span
+                                className={`inline-flex items-center gap-1 text-xs font-semibold mt-1 ${
+                                  lowStock ? 'text-amber-700' : 'text-emerald-700'
+                                }`}
+                              >
+                                {lowStock && <AlertTriangle className="w-3.5 h-3.5" />}
+                                Stock: {v.stock_actual} und.
+                              </span>
+                            </div>
 
-                      <button
-                        type="button"
-                        onClick={() => handleArchiveVariante(v)}
-                        className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 cursor-pointer"
-                        title="Ocultar del catálogo"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                            <div className="flex items-center gap-1.5 shrink-0 ml-auto">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setStockModalVar(v)
+                                  setStockDelta('')
+                                  setStockMotivo('Reabastecimiento de mercancía')
+                                }}
+                                className="px-2.5 py-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-semibold flex items-center gap-1 cursor-pointer"
+                                title={`Reabastecer ${specs}`}
+                              >
+                                <PlusCircle className="w-3.5 h-3.5" />
+                                Reabastecer
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => openEditModal(v)}
+                                className="px-2.5 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-semibold flex items-center gap-1 cursor-pointer"
+                                title="Editar variante"
+                              >
+                                <Pencil className="w-3.5 h-3.5" />
+                                Editar
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => handleArchiveVariante(v)}
+                                className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 cursor-pointer"
+                                title="Ocultar variante del catálogo"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </div>
+                        )
+                      })}
                     </div>
-                  </div>
+                  </section>
                 )
               })
             )}
@@ -923,6 +1100,120 @@ export default function InventarioManager({ categorias, variantes, onInventoryUp
         </div>
       )}
 
+      {addingVariantProduct && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+          <form
+            onSubmit={handleAddVariant}
+            className="bg-white rounded-2xl max-w-md w-full p-5 shadow-lg space-y-3"
+          >
+            <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+              <div>
+                <h3 className="font-bold text-base text-slate-900">Agregar variante</h3>
+                <p className="text-xs text-slate-500">
+                  Se agregará dentro de {addingVariantProduct.nombre}.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAddingVariantProduct(null)}
+                className="p-1 rounded-lg hover:bg-slate-100 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2.5">
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">Talla</label>
+                <input
+                  type="text"
+                  value={variantDraft.talla}
+                  onChange={(e) => setVariantDraft({ ...variantDraft, talla: e.target.value })}
+                  placeholder="Ej. M"
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">Color</label>
+                <input
+                  type="text"
+                  value={variantDraft.color}
+                  onChange={(e) => setVariantDraft({ ...variantDraft, color: e.target.value })}
+                  placeholder="Ej. Negro"
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">SKU / Código</label>
+                <input
+                  type="text"
+                  value={variantDraft.sku}
+                  onChange={(e) => setVariantDraft({ ...variantDraft, sku: e.target.value })}
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">Stock inicial</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={variantDraft.stock_inicial}
+                  onChange={(e) =>
+                    setVariantDraft({ ...variantDraft, stock_inicial: e.target.value })
+                  }
+                  placeholder="0"
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">Precio costo</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={variantDraft.precio_costo}
+                  onChange={(e) =>
+                    setVariantDraft({ ...variantDraft, precio_costo: e.target.value })
+                  }
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">Precio venta *</label>
+                <input
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  required
+                  value={variantDraft.precio_venta}
+                  onChange={(e) =>
+                    setVariantDraft({ ...variantDraft, precio_venta: e.target.value })
+                  }
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setAddingVariantProduct(null)}
+                className="flex-1 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold py-2.5 text-xs cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                disabled={savingVariant}
+                className="flex-1 rounded-xl bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white font-semibold py-2.5 text-xs cursor-pointer"
+              >
+                {savingVariant ? 'Guardando...' : 'Guardar variante'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
       {/* MODAL: ENTRADA / AJUSTE DE STOCK */}
       {stockModalVar && (
         <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
@@ -932,9 +1223,12 @@ export default function InventarioManager({ categorias, variantes, onInventoryUp
           >
             <div className="flex items-center justify-between border-b border-slate-200 pb-3">
               <div>
-                <h3 className="font-bold text-sm text-slate-900">Ajustar Stock</h3>
-                <p className="text-xs text-slate-500">
-                  {stockModalVar.productos?.nombre} (Actual: {stockModalVar.stock_actual} und.)
+                <h3 className="font-bold text-sm text-slate-900">Reabastecer variante</h3>
+                <p className="text-xs text-slate-700 mt-1">
+                  {stockModalVar.productos?.nombre}
+                </p>
+                <p className="text-[11px] text-slate-500">
+                  Stock actual de esta combinación: {stockModalVar.stock_actual} und.
                 </p>
               </div>
               <button
@@ -946,16 +1240,76 @@ export default function InventarioManager({ categorias, variantes, onInventoryUp
               </button>
             </div>
 
+            {(tieneTallasModalStock || tieneColoresModalStock) && (
+              <div className="grid grid-cols-2 gap-2.5">
+                {tieneTallasModalStock && (
+                  <label className="block text-xs font-medium text-slate-700">
+                    Talla
+                    <select
+                      value={stockModalVar.talla || ''}
+                      onChange={(e) => {
+                        const nextTalla = e.target.value
+                        const nextVariant =
+                          variantesModalStock.find(
+                            (variant) =>
+                              (variant.talla || '') === nextTalla &&
+                              (variant.color || '') === (stockModalVar.color || '')
+                          ) ||
+                          variantesModalStock.find(
+                            (variant) => (variant.talla || '') === nextTalla
+                          )
+                        if (nextVariant) {
+                          setStockModalVar(nextVariant)
+                          setStockDelta('')
+                        }
+                      }}
+                      className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                    >
+                      {tallasModalStock.map((talla) => (
+                        <option key={talla || 'sin-talla'} value={talla}>
+                          {talla || 'Sin talla'}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                {tieneColoresModalStock && (
+                  <label className="block text-xs font-medium text-slate-700">
+                    Color
+                    <select
+                      value={stockModalVar.color || ''}
+                      onChange={(e) => {
+                        const nextVariant = variantesDeTallaModal.find(
+                          (variant) => (variant.color || '') === e.target.value
+                        )
+                        if (nextVariant) {
+                          setStockModalVar(nextVariant)
+                          setStockDelta('')
+                        }
+                      }}
+                      className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                    >
+                      {coloresModalStock.map((color) => (
+                        <option key={color || 'sin-color'} value={color}>
+                          {color || 'Sin color'}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+              </div>
+            )}
+
             <div>
               <label className="block text-xs font-medium text-slate-700 mb-1">
-                Cantidad a sumar (o negativa para restar) *
+                Cantidad para esta talla y color (negativa para restar) *
               </label>
               <input
                 type="number"
                 required
                 value={stockDelta}
                 onChange={(e) => setStockDelta(e.target.value)}
-                placeholder="Ej. 10 (o -2 si hubo merma)"
+                placeholder="Ej. 10 unidades"
                 className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
               />
             </div>
