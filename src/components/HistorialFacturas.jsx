@@ -3,12 +3,33 @@ import { supabase } from '../supabase'
 import { Search, Printer, MessageCircle, Eye, X, RefreshCw } from 'lucide-react'
 import { formatWhatsAppPhone } from '../utils/phone'
 
+const toDateKey = (date) =>
+  [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, '0'),
+    String(date.getDate()).padStart(2, '0')
+  ].join('-')
+
+const getLocalDateKey = (value) => {
+  if (!value) return ''
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value
+
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? '' : toDateKey(date)
+}
+
 export default function HistorialFacturas({ storeConfig = {} }) {
   const [facturas, setFacturas] = useState([])
   const [loading, setLoading] = useState(true)
   const [errorMsg, setErrorMsg] = useState('')
   const [busqueda, setBusqueda] = useState('')
+  const [rangoFecha, setRangoFecha] = useState('todas')
   const [fechaFiltro, setFechaFiltro] = useState('')
+  const [rangoFechaBounds, setRangoFechaBounds] = useState({
+    todayKey: '',
+    weekStartKey: '',
+    currentMonth: ''
+  })
   const [facturaSeleccionada, setFacturaSeleccionada] = useState(null)
 
   const cargarFacturas = async () => {
@@ -82,6 +103,21 @@ export default function HistorialFacturas({ storeConfig = {} }) {
     return extras ? `${base} - ${extras}` : base
   }
 
+  const seleccionarRangoFecha = (range) => {
+    if (['hoy', 'semana', 'mes'].includes(range)) {
+      const today = new Date()
+      const todayKey = toDateKey(today)
+      const weekStart = new Date(today.getFullYear(), today.getMonth(), today.getDate())
+      weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() + 6) % 7))
+      setRangoFechaBounds({
+        todayKey,
+        weekStartKey: toDateKey(weekStart),
+        currentMonth: todayKey.slice(0, 7)
+      })
+    }
+    setRangoFecha(range)
+  }
+
   const facturasFiltradas = facturas.filter((f) => {
     const texto = busqueda.trim().toLowerCase()
     const nombreCliente = f.clientes?.nombre || ''
@@ -93,8 +129,19 @@ export default function HistorialFacturas({ storeConfig = {} }) {
       String(f.metodo_pago ?? '').toLowerCase().includes(texto) ||
       String(f.estado_pago ?? '').toLowerCase().includes(texto)
 
-    const fechaReg = f.fecha ? new Date(f.fecha).toISOString().slice(0, 10) : ''
-    const coincideFecha = !fechaFiltro || fechaReg === fechaFiltro
+    const fechaReg = getLocalDateKey(f.fecha)
+    const coincideFecha =
+      rangoFecha === 'hoy'
+        ? fechaReg === rangoFechaBounds.todayKey
+        : rangoFecha === 'semana'
+        ? fechaReg >= rangoFechaBounds.weekStartKey &&
+          fechaReg <= rangoFechaBounds.todayKey
+        : rangoFecha === 'mes'
+        ? fechaReg.startsWith(rangoFechaBounds.currentMonth) &&
+          fechaReg <= rangoFechaBounds.todayKey
+        : rangoFecha === 'personalizada'
+        ? !fechaFiltro || fechaReg === fechaFiltro
+        : true
 
     return coincideTexto && coincideFecha
   })
@@ -161,23 +208,50 @@ export default function HistorialFacturas({ storeConfig = {} }) {
       </div>
 
       {/* Filtros */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 bg-white p-4 rounded-xl shadow-sm border">
-        <div className="md:col-span-2 relative">
-          <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-          <input
-            type="text"
-            placeholder="Buscar por # factura, cliente, método o estado..."
-            value={busqueda}
-            onChange={(e) => setBusqueda(e.target.value)}
-            className="w-full pl-9 pr-3 py-2 border rounded-lg text-sm"
-          />
+      <div className="space-y-3 bg-white p-4 rounded-xl shadow-sm border">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
+          <div className="relative">
+            <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              placeholder="Buscar por # factura, cliente, método o estado..."
+              value={busqueda}
+              onChange={(e) => setBusqueda(e.target.value)}
+              className="w-full pl-9 pr-3 py-2 border rounded-lg text-sm"
+            />
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {[
+              { id: 'hoy', label: 'Hoy' },
+              { id: 'semana', label: 'Esta semana' },
+              { id: 'mes', label: 'Este mes' },
+              { id: 'todas', label: 'Todas' },
+              { id: 'personalizada', label: 'Personalizada' }
+            ].map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                onClick={() => seleccionarRangoFecha(option.id)}
+                className={`rounded-lg px-3 py-2 text-xs font-semibold transition cursor-pointer ${
+                  rangoFecha === option.id
+                    ? 'bg-rose-600 text-white'
+                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                }`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
         </div>
-        <input
-          type="date"
-          value={fechaFiltro}
-          onChange={(e) => setFechaFiltro(e.target.value)}
-          className="px-3 py-2 border rounded-lg text-sm"
-        />
+        {rangoFecha === 'personalizada' && (
+          <input
+            type="date"
+            aria-label="Filtrar facturas por fecha"
+            value={fechaFiltro}
+            onChange={(e) => setFechaFiltro(e.target.value)}
+            className="w-full sm:w-auto px-3 py-2 border rounded-lg text-sm"
+          />
+        )}
       </div>
 
       {errorMsg && (
