@@ -107,28 +107,29 @@ export default function HistorialFacturas() {
         const sub = Number(det.subtotal ?? cant * Number(det.precio_unitario || 0))
         return `• ${obtenerNombreItem(det)} x${cant} — $${sub.toFixed(2)}`
       })
-      .join('%0A')
+      .join('\n')
 
     const numFactura = factura.numero_factura ?? factura.id
     const clienteNom = factura.clientes?.nombre || 'Consumidor Final'
     const total = Number(factura.total || 0).toFixed(2)
     const pagado = Number(factura.monto_pagado ?? factura.total ?? 0).toFixed(2)
 
-    const msg =
-      `*RECIBO DE COMPRA* (Reimpresión)%0A` +
-      `Factura: #${numFactura}%0A` +
-      `Cliente: ${clienteNom}%0A` +
-      `Fecha: ${factura.fecha ? new Date(factura.fecha).toLocaleString() : ''}%0A` +
-      `-----------------%0A` +
-      `${detalleTexto}%0A` +
-      `-----------------%0A` +
-      `*Total: $${total}*%0A` +
+    const msg = [
+      '*RECIBO DE COMPRA* (Reimpresión)',
+      `Factura: #${numFactura}`,
+      `Cliente: ${clienteNom}`,
+      `Fecha: ${factura.fecha ? new Date(factura.fecha).toLocaleString() : ''}`,
+      '-----------------',
+      detalleTexto,
+      '-----------------',
+      `*Total: $${total}*`,
       `Pagado: $${pagado} (${factura.metodo_pago || 'Efectivo'} - ${factura.estado_pago || 'Pagada'})`
+    ].join('\n')
 
     const tel = formatWhatsAppPhone(factura.clientes?.telefono)
     const url = tel
-      ? `https://wa.me/${tel}?text=${msg}`
-      : `https://wa.me/?text=${msg}`
+      ? `https://wa.me/${tel}?text=${encodeURIComponent(msg)}`
+      : `https://wa.me/?text=${encodeURIComponent(msg)}`
 
     window.open(url, '_blank', 'noopener,noreferrer')
   }
