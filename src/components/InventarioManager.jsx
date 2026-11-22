@@ -76,6 +76,12 @@ export default function InventarioManager({ categorias, variantes, onInventoryUp
     )
   }
 
+  const selectedNewCategoryId = categorias.some(
+    (category) => String(category.id) === String(newProd.categoria_id)
+  )
+    ? newProd.categoria_id
+    : categorias[0]?.id || ''
+
   const openAddVariantModal = (group) => {
     const baseVariant = group.variantes[0]
     setAddingVariantProduct({
@@ -145,7 +151,7 @@ export default function InventarioManager({ categorias, variantes, onInventoryUp
           {
             nombre: newProd.nombre.trim(),
             marca: newProd.marca.trim() || null,
-            categoria_id: newProd.categoria_id || categorias[0]?.id || null
+            categoria_id: selectedNewCategoryId || null
           }
         ])
         .select()
@@ -295,6 +301,7 @@ export default function InventarioManager({ categorias, variantes, onInventoryUp
       nombre: v.productos?.nombre || '',
       marca: v.productos?.marca || '',
       categoria_id: v.productos?.categoria_id || '',
+      categoria_nombre: v.productos?.categorias?.nombre || '',
       sku: v.sku || '',
       talla: v.talla || '',
       color: v.color || '',
@@ -564,7 +571,7 @@ export default function InventarioManager({ categorias, variantes, onInventoryUp
             <div>
               <label className="block text-xs font-medium text-slate-700 mb-1">Categoría</label>
               <select
-                value={newProd.categoria_id}
+                value={selectedNewCategoryId}
                 onChange={(e) => setNewProd({ ...newProd, categoria_id: e.target.value })}
                 className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm bg-white"
               >
@@ -980,6 +987,15 @@ export default function InventarioManager({ categorias, variantes, onInventoryUp
                   }
                   className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm bg-white"
                 >
+                  {editingVar.categoria_id &&
+                    !categorias.some(
+                      (category) =>
+                        String(category.id) === String(editingVar.categoria_id)
+                    ) && (
+                      <option value={editingVar.categoria_id}>
+                        {editingVar.categoria_nombre || 'Categoría actual'}
+                      </option>
+                    )}
                   {categorias.map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.nombre}

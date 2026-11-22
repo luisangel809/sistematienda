@@ -3,7 +3,7 @@ import { supabase } from '../supabase'
 import { Search, Printer, MessageCircle, Eye, X, RefreshCw } from 'lucide-react'
 import { formatWhatsAppPhone } from '../utils/phone'
 
-export default function HistorialFacturas() {
+export default function HistorialFacturas({ storeConfig = {} }) {
   const [facturas, setFacturas] = useState([])
   const [loading, setLoading] = useState(true)
   const [errorMsg, setErrorMsg] = useState('')
@@ -114,7 +114,15 @@ export default function HistorialFacturas() {
     const total = Number(factura.total || 0).toFixed(2)
     const pagado = Number(factura.monto_pagado ?? factura.total ?? 0).toFixed(2)
 
+    const storeHeader = [
+      storeConfig.nombre_tienda || 'Tienda & POS',
+      ...(storeConfig.nombre_vendedor ? [`Vendedor: ${storeConfig.nombre_vendedor}`] : []),
+      ...(storeConfig.telefono ? [`Teléfono: ${storeConfig.telefono}`] : []),
+      ...(storeConfig.direccion ? [`Dirección: ${storeConfig.direccion}`] : []),
+      '-----------------'
+    ]
     const msg = [
+      ...storeHeader,
       '*RECIBO DE COMPRA* (Reimpresión)',
       `Factura: #${numFactura}`,
       `Cliente: ${clienteNom}`,

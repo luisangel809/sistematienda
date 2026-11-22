@@ -4,9 +4,9 @@ import HistorialFacturas from './components/HistorialFacturas'
 import ClientesAbonos from './components/ClientesAbonos'
 import InventarioManager from './components/InventarioManager'
 import DashboardStats from './components/DashboardStats'
+import SettingsMenu from './components/SettingsMenu'
 import { formatWhatsAppPhone } from './utils/phone'
 import {
-  LogOut,
   ShoppingBag,
   PackagePlus,
   ReceiptText,
@@ -22,6 +22,13 @@ import {
 } from 'lucide-react'
 
 const CART_STORAGE_KEY = 'pos_tienda_cart_v1'
+const DEFAULT_STORE_CONFIG = {
+  id: 1,
+  nombre_tienda: 'Tienda & POS',
+  nombre_vendedor: '',
+  telefono: '',
+  direccion: ''
+}
 
 const formatMoney = (amount) =>
   new Intl.NumberFormat('es-DO', {
@@ -154,6 +161,8 @@ export default function App() {
   const [loadingData, setLoadingData] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedCategoria, setSelectedCategoria] = useState('ALL')
+  const [storeConfig, setStoreConfig] = useState(DEFAULT_STORE_CONFIG)
+  const [storeConfigError, setStoreConfigError] = useState('')
 
   // POS cart state (persistido en localStorage)
   const [cart, setCart] = useState(() => {
@@ -206,7 +215,12 @@ export default function App() {
   // Load categories, variants & clients when logged in
   const loadStoreData = async () => {
     setLoadingData(true)
-    const [{ data: cats }, { data: vars, error: varsErr }, { data: clis }] = await Promise.all([
+    const [
+      { data: cats },
+      { data: vars, error: varsErr },
+      { data: clis },
+      { data: configData, error: configErr }
+    ] = await Promise.all([
       supabase.from('categorias').select('*').order('nombre'),
       supabase
         .from('variantes')
@@ -234,7 +248,12 @@ export default function App() {
             monto_pagado
           )
         `)
-        .order('nombre')
+        .order('nombre'),
+      supabase
+        .from('configuracion_tienda')
+        .select('id, nombre_tienda, nombre_vendedor, telefono, direccion')
+        .eq('id', 1)
+        .maybeSingle()
     ])
 
     if (cats) {
@@ -268,6 +287,12 @@ export default function App() {
         return { ...c, deuda }
       })
       setClientesList(clientesConDeuda)
+    }
+    if (configErr) {
+      setStoreConfigError(configErr.message)
+    } else {
+      setStoreConfigError('')
+      setStoreConfig({ ...DEFAULT_STORE_CONFIG, ...(configData || {}) })
     }
     setLoadingData(false)
   }
@@ -588,6 +613,11 @@ export default function App() {
 
   const shareReceiptWhatsApp = (r) => {
     const lines = [
+      storeConfig.nombre_tienda || 'Tienda & POS',
+      ...(storeConfig.nombre_vendedor ? [`Vendedor: ${storeConfig.nombre_vendedor}`] : []),
+      ...(storeConfig.telefono ? [`Teléfono: ${storeConfig.telefono}`] : []),
+      ...(storeConfig.direccion ? [`Dirección: ${storeConfig.direccion}`] : []),
+      '----------------',
       `*RECIBO DE VENTA #${r.numero}*`,
       `Fecha: ${r.fecha}`,
       `Cliente: ${r.cliente}`,
@@ -697,7 +727,9 @@ export default function App() {
               <Store className="w-5 h-5" />
             </div>
             <div>
-              <h1 className="font-bold text-sm sm:text-base leading-tight">Tienda & POS</h1>
+              <h1 className="font-bold text-sm sm:text-base leading-tight">
+                {storeConfig.nombre_tienda || 'Tienda & POS'}
+              </h1>
               <p className="text-[11px] text-slate-500 truncate max-w-45 sm:max-w-xs">
                 {session.user.email}
               </p>
@@ -762,13 +794,17 @@ export default function App() {
             </button>
           </div>
 
-          <button
-            onClick={handleLogout}
-            className="px-3 py-2 rounded-xl text-xs font-medium text-slate-600 hover:bg-slate-100 flex items-center gap-1.5 cursor-pointer"
-          >
-            <LogOut className="w-4 h-4" />
-            <span className="hidden sm:inline">Salir</span>
-          </button>
+          <SettingsMenu
+            onLogout={handleLogout}
+            storeConfig={storeConfig}
+            storeConfigError={storeConfigError}
+            onStoreUpdated={(config) => {
+              setStoreConfig(config)
+              setStoreConfigError('')
+            }}
+            onCategoriesUpdated={loadStoreData}
+            onNotify={showToast}
+          />
         </div>
       </header>
 
@@ -779,6 +815,8 @@ export default function App() {
             className={`rounded-xl px-4 py-2.5 text-sm font-medium border ${
               feedback.type === 'success'
                 ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                : feedback.type === 'info'
+                ? 'bg-blue-50 text-blue-800 border-blue-200'
                 : 'bg-red-50 text-red-800 border-red-200'
             }`}
           >
@@ -1230,7 +1268,7 @@ export default function App() {
 
         {activeTab === 'clientes' && <ClientesAbonos onClientesUpdated={loadStoreData} />}
 
-        {activeTab === 'historial' && <HistorialFacturas />}
+        {activeTab === 'historial' && <HistorialFacturas storeConfig={storeConfig} />}
 
         {activeTab === 'dashboard' && <DashboardStats variantes={variantes} />}
       </main>

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../supabase'
+import { downloadStoreBackup } from '../utils/storeBackup'
 import {
   BarChart3,
   DollarSign,
@@ -11,39 +12,12 @@ import {
   Download
 } from 'lucide-react'
 
-const BACKUP_TABLES = [
-  'categorias',
-  'productos',
-  'variantes',
-  'clientes',
-  'facturas',
-  'detalle_facturas',
-  'abonos',
-  'movimientos_inventario'
-]
-const BACKUP_PAGE_SIZE = 1000
-
 const formatMoney = (amount) =>
   new Intl.NumberFormat('es-DO', {
     style: 'currency',
     currency: 'DOP',
     minimumFractionDigits: 2
   }).format(Number(amount || 0))
-
-const fetchAllRows = async (table) => {
-  const rows = []
-
-  for (let from = 0; ; from += BACKUP_PAGE_SIZE) {
-    const { data, error } = await supabase
-      .from(table)
-      .select('*')
-      .range(from, from + BACKUP_PAGE_SIZE - 1)
-
-    if (error) throw new Error(`${table}: ${error.message}`)
-    rows.push(...(data || []))
-    if (!data || data.length < BACKUP_PAGE_SIZE) return rows
-  }
-}
 
 const getDateValue = (row) => row?.creado_en || row?.fecha || row?.created_at || null
 
@@ -122,35 +96,9 @@ export default function DashboardStats({ variantes = [] }) {
     setBackupError('')
 
     try {
-      const entries = await Promise.all(
-        BACKUP_TABLES.map(async (table) => [table, await fetchAllRows(table)])
-      )
-      const exportedAt = new Date()
-      const backup = {
-        exportedAt: exportedAt.toISOString(),
-        data: Object.fromEntries(entries)
-      }
-      const date = [
-        exportedAt.getFullYear(),
-        String(exportedAt.getMonth() + 1).padStart(2, '0'),
-        String(exportedAt.getDate()).padStart(2, '0')
-      ].join('-')
-      const blob = new Blob([JSON.stringify(backup, null, 2)], {
-        type: 'application/json'
-      })
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = `respaldo-tienda-${date}.json`
-      document.body.appendChild(link)
-      try {
-        link.click()
-      } finally {
-        link.remove()
-        window.setTimeout(() => URL.revokeObjectURL(url), 1000)
-      }
+      await downloadStoreBackup()
     } catch (error) {
-      setBackupError(`No se pudo generar el respaldo: ${error.message}`)
+      setBackupError(`No se pudo generar el respaldo: ${error.message || error}`)
     } finally {
       setBackupLoading(false)
     }
