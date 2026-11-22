@@ -7,8 +7,21 @@ import {
   Wallet,
   AlertTriangle,
   Award,
-  RefreshCw
+  RefreshCw,
+  Download
 } from 'lucide-react'
+
+const BACKUP_TABLES = [
+  'categorias',
+  'productos',
+  'variantes',
+  'clientes',
+  'facturas',
+  'detalle_facturas',
+  'abonos',
+  'movimientos_inventario'
+]
+const BACKUP_PAGE_SIZE = 1000
 
 const formatMoney = (amount) =>
   new Intl.NumberFormat('es-DO', {
@@ -16,6 +29,21 @@ const formatMoney = (amount) =>
     currency: 'DOP',
     minimumFractionDigits: 2
   }).format(Number(amount || 0))
+
+const fetchAllRows = async (table) => {
+  const rows = []
+
+  for (let from = 0; ; from += BACKUP_PAGE_SIZE) {
+    const { data, error } = await supabase
+      .from(table)
+      .select('*')
+      .range(from, from + BACKUP_PAGE_SIZE - 1)
+
+    if (error) throw new Error(`${table}: ${error.message}`)
+    rows.push(...(data || []))
+    if (!data || data.length < BACKUP_PAGE_SIZE) return rows
+  }
+}
 
 const getDateValue = (row) => row?.creado_en || row?.fecha || row?.created_at || null
 
@@ -43,6 +71,8 @@ export default function DashboardStats({ variantes = [] }) {
   const [detalles, setDetalles] = useState([])
   const [loading, setLoading] = useState(true)
   const [queryError, setQueryError] = useState('')
+  const [backupLoading, setBackupLoading] = useState(false)
+  const [backupError, setBackupError] = useState('')
 
   const fetchStatsData = async () => {
     setLoading(true)
@@ -86,6 +116,45 @@ export default function DashboardStats({ variantes = [] }) {
   useEffect(() => {
     fetchStatsData()
   }, [])
+
+  const downloadBackup = async () => {
+    setBackupLoading(true)
+    setBackupError('')
+
+    try {
+      const entries = await Promise.all(
+        BACKUP_TABLES.map(async (table) => [table, await fetchAllRows(table)])
+      )
+      const exportedAt = new Date()
+      const backup = {
+        exportedAt: exportedAt.toISOString(),
+        data: Object.fromEntries(entries)
+      }
+      const date = [
+        exportedAt.getFullYear(),
+        String(exportedAt.getMonth() + 1).padStart(2, '0'),
+        String(exportedAt.getDate()).padStart(2, '0')
+      ].join('-')
+      const blob = new Blob([JSON.stringify(backup, null, 2)], {
+        type: 'application/json'
+      })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `respaldo-tienda-${date}.json`
+      document.body.appendChild(link)
+      try {
+        link.click()
+      } finally {
+        link.remove()
+        window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+      }
+    } catch (error) {
+      setBackupError(`No se pudo generar el respaldo: ${error.message}`)
+    } finally {
+      setBackupLoading(false)
+    }
+  }
 
   const stats = useMemo(() => {
     const startDate = getStartDateForRange(range)
@@ -253,6 +322,16 @@ export default function DashboardStats({ variantes = [] }) {
 
           <button
             type="button"
+            onClick={downloadBackup}
+            disabled={backupLoading}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <Download className="w-4 h-4" />
+            {backupLoading ? 'Generando respaldo...' : 'Descargar Respaldo'}
+          </button>
+
+          <button
+            type="button"
             onClick={fetchStatsData}
             className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 cursor-pointer"
             title="Actualizar estadísticas"
@@ -261,6 +340,15 @@ export default function DashboardStats({ variantes = [] }) {
           </button>
         </div>
       </div>
+
+      {backupError && (
+        <div
+          role="alert"
+          className="rounded-xl bg-red-50 border border-red-200 p-3.5 text-xs text-red-700"
+        >
+          {backupError}
+        </div>
+      )}
 
       {queryError && (
         <div className="rounded-xl bg-red-50 border border-red-200 p-3.5 text-xs text-red-700">
