@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../supabase'
-import { downloadStoreBackup } from '../utils/storeBackup'
 import {
   BarChart3,
   DollarSign,
@@ -8,8 +7,7 @@ import {
   Wallet,
   AlertTriangle,
   Award,
-  RefreshCw,
-  Download
+  RefreshCw
 } from 'lucide-react'
 
 const formatMoney = (amount) =>
@@ -45,8 +43,6 @@ export default function DashboardStats({ variantes = [] }) {
   const [detalles, setDetalles] = useState([])
   const [loading, setLoading] = useState(true)
   const [queryError, setQueryError] = useState('')
-  const [backupLoading, setBackupLoading] = useState(false)
-  const [backupError, setBackupError] = useState('')
 
   const fetchStatsData = async () => {
     setLoading(true)
@@ -90,19 +86,6 @@ export default function DashboardStats({ variantes = [] }) {
   useEffect(() => {
     fetchStatsData()
   }, [])
-
-  const downloadBackup = async () => {
-    setBackupLoading(true)
-    setBackupError('')
-
-    try {
-      await downloadStoreBackup()
-    } catch (error) {
-      setBackupError(`No se pudo generar el respaldo: ${error.message || error}`)
-    } finally {
-      setBackupLoading(false)
-    }
-  }
 
   const stats = useMemo(() => {
     const startDate = getStartDateForRange(range)
@@ -270,16 +253,6 @@ export default function DashboardStats({ variantes = [] }) {
 
           <button
             type="button"
-            onClick={downloadBackup}
-            disabled={backupLoading}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <Download className="w-4 h-4" />
-            {backupLoading ? 'Generando respaldo...' : 'Descargar Respaldo'}
-          </button>
-
-          <button
-            type="button"
             onClick={fetchStatsData}
             className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 cursor-pointer"
             title="Actualizar estadísticas"
@@ -288,15 +261,6 @@ export default function DashboardStats({ variantes = [] }) {
           </button>
         </div>
       </div>
-
-      {backupError && (
-        <div
-          role="alert"
-          className="rounded-xl bg-red-50 border border-red-200 p-3.5 text-xs text-red-700"
-        >
-          {backupError}
-        </div>
-      )}
 
       {queryError && (
         <div className="rounded-xl bg-red-50 border border-red-200 p-3.5 text-xs text-red-700">
