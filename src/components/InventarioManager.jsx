@@ -1,7 +1,8 @@
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../supabase'
 import {
   PackagePlus,
+  Plus,
   Pencil,
   PlusCircle,
   Search,
@@ -42,6 +43,8 @@ export default function InventarioManager({ categorias, variantes, onInventoryUp
   const [newPhotoFile, setNewPhotoFile] = useState(null)
   const [newPhotoPreview, setNewPhotoPreview] = useState('')
   const [savingProd, setSavingProd] = useState(false)
+  const [mobileProductFormOpen, setMobileProductFormOpen] = useState(false)
+  const newProductFormRef = useRef(null)
   const [addingVariantProduct, setAddingVariantProduct] = useState(null)
   const [variantDraft, setVariantDraft] = useState({
     talla: '',
@@ -64,6 +67,12 @@ export default function InventarioManager({ categorias, variantes, onInventoryUp
   const [stockDelta, setStockDelta] = useState('')
   const [stockMotivo, setStockMotivo] = useState('Reabastecimiento de mercancía')
   const [savingStock, setSavingStock] = useState(false)
+
+  useEffect(() => {
+    if (mobileProductFormOpen) {
+      newProductFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }
+  }, [mobileProductFormOpen])
 
   const showToast = (type, message) => {
     setFeedback({ type, message })
@@ -210,6 +219,7 @@ export default function InventarioManager({ categorias, variantes, onInventoryUp
       setNewPhotoPreview('')
 
       await onInventoryUpdated()
+      setMobileProductFormOpen(false)
       showToast('success', 'Producto agregado al inventario.')
     } catch (err) {
       showToast('error', err.message || 'Error al guardar el producto.')
@@ -500,16 +510,38 @@ export default function InventarioManager({ categorias, variantes, onInventoryUp
         </div>
       )}
 
+      <button
+        type="button"
+        onClick={() => setMobileProductFormOpen(true)}
+        className="md:hidden w-full rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-semibold py-3 px-4 text-sm flex items-center justify-center gap-2 shadow-sm cursor-pointer"
+      >
+        <Plus className="w-5 h-5" />
+        Nuevo producto
+      </button>
+
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
         {/* Formulario Nuevo Producto */}
         <form
+          ref={newProductFormRef}
           onSubmit={handleCreateProduct}
-          className="lg:col-span-5 bg-white rounded-2xl border border-slate-200 p-4 space-y-3 h-fit"
+          className={`lg:col-span-5 bg-white rounded-2xl border border-slate-200 p-4 space-y-3 h-fit ${
+            mobileProductFormOpen ? 'block' : 'hidden'
+          } md:block`}
         >
-          <h2 className="font-bold text-base flex items-center gap-2">
-            <PackagePlus className="w-4 h-4 text-rose-600" />
-            Nuevo Producto
-          </h2>
+          <div className="flex items-center justify-between">
+            <h2 className="font-bold text-base flex items-center gap-2">
+              <PackagePlus className="w-4 h-4 text-rose-600" />
+              Nuevo Producto
+            </h2>
+            <button
+              type="button"
+              onClick={() => setMobileProductFormOpen(false)}
+              className="md:hidden p-1 rounded-lg hover:bg-slate-100 text-slate-500 cursor-pointer"
+              aria-label="Cerrar formulario de nuevo producto"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
 
           {/* Foto opcional */}
           <div className="flex items-center gap-3">
