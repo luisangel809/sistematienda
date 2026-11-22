@@ -1,7 +1,16 @@
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../supabase'
-import { Search, Printer, MessageCircle, Eye, X, RefreshCw } from 'lucide-react'
+import {
+  Search,
+  Printer,
+  MessageCircle,
+  Eye,
+  X,
+  RefreshCw,
+  Ban
+} from 'lucide-react'
 import { formatWhatsAppPhone } from '../utils/phone'
+import { getAnulacionUpdate, isFacturaAnulada } from '../utils/facturas'
 
 const toDateKey = (date) =>
   [
@@ -18,10 +27,11 @@ const getLocalDateKey = (value) => {
   return Number.isNaN(date.getTime()) ? '' : toDateKey(date)
 }
 
-export default function HistorialFacturas({ storeConfig = {} }) {
+export default function HistorialFacturas({ storeConfig = {}, onInventoryUpdated }) {
   const [facturas, setFacturas] = useState([])
   const [loading, setLoading] = useState(true)
   const [errorMsg, setErrorMsg] = useState('')
+  const [feedback, setFeedback] = useState(null)
   const [busqueda, setBusqueda] = useState('')
   const [rangoFecha, setRangoFecha] = useState('todas')
   const [fechaFiltro, setFechaFiltro] = useState('')
@@ -31,6 +41,9 @@ export default function HistorialFacturas({ storeConfig = {} }) {
     currentMonth: ''
   })
   const [facturaSeleccionada, setFacturaSeleccionada] = useState(null)
+  const [facturaAnular, setFacturaAnular] = useState(null)
+  const [motivoAnulacion, setMotivoAnulacion] = useState('')
+  const [anulandoFacturaId, setAnulandoFacturaId] = useState(null)
 
   const cargarFacturas = async () => {
     setLoading(true)
@@ -39,17 +52,7 @@ export default function HistorialFacturas({ storeConfig = {} }) {
     const { data, error } = await supabase
       .from('facturas')
       .select(`
-        id,
-        numero_factura,
-        cliente_id,
-        subtotal,
-        descuento,
-        total,
-        monto_pagado,
-        metodo_pago,
-        estado_pago,
-        notas,
-        fecha,
+        *,
         clientes (
           id,
           nombre,
@@ -57,6 +60,7 @@ export default function HistorialFacturas({ storeConfig = {} }) {
         ),
         detalle_facturas (
           id,
+          variante_id,
           cantidad,
           precio_unitario,
           subtotal,
@@ -87,6 +91,212 @@ export default function HistorialFacturas({ storeConfig = {} }) {
   useEffect(() => {
     cargarFacturas()
   }, [])
+
+  const showFeedback = (type, message) => {
+    setFeedback({ type, message })
+    window.setTimeout(() => setFeedback(null), 5000)
+  }
+
+  const anularFactura = async () => {
+    if (!facturaAnular || anulandoFacturaId) return
+
+    const facturaSeleccionadaParaAnular = facturaAnular
+    const facturaId = facturaSeleccionadaParaAnular.id
+    const numero = facturaSeleccionadaParaAnular.numero_factura ?? facturaId
+    setAnulandoFacturaId(facturaId)
+    setErrorMsg('')
+
+    let stockActualizado = []
+    let facturaMarcada = false
+    let facturaActual = null
+    let movimientosError = null
+
+    try {
+      const { data: facturaLeida, error: facturaError } = await supabase
+        .from('facturas')
+        .select('*')
+        .eq('id', facturaId)
+        .single()
+      if (facturaError) throw facturaError
+      facturaActual = facturaLeida
+      if (isFacturaAnulada(facturaActual)) {
+        throw new Error('Esta factura ya fue anulada.')
+      }
+
+      const { data: detalles, error: detallesError } = await supabase
+        .from('detalle_facturas')
+        .select('variante_id, cantidad')
+        .eq('factura_id', facturaId)
+      if (detallesError) throw detallesError
+
+      const cantidadesPorVariante = new Map()
+      for (const detalle of detalles || []) {
+        if (!detalle.variante_id || Number(detalle.cantidad) <= 0) {
+          throw new Error('La factura contiene un artículo sin variante o cantidad válida.')
+        }
+        cantidadesPorVariante.set(
+          detalle.variante_id,
+          (cantidadesPorVariante.get(detalle.variante_id) || 0) +
+            Number(detalle.cantidad)
+        )
+      }
+
+      for (const [varianteId, cantidad] of cantidadesPorVariante) {
+        const { data: variante, error: varianteError } = await supabase
+          .from('variantes')
+          .select('id, stock_actual')
+          .eq('id', varianteId)
+          .single()
+        if (varianteError) throw varianteError
+
+        const stockAnteriorOriginal = variante.stock_actual
+        const stockAnterior = Number(stockAnteriorOriginal || 0)
+        const stockNuevo = stockAnterior + cantidad
+        let updateStockQuery = supabase
+          .from('variantes')
+          .update({ stock_actual: stockNuevo })
+          .eq('id', varianteId)
+        updateStockQuery =
+          stockAnteriorOriginal === null
+            ? updateStockQuery.is('stock_actual', null)
+            : updateStockQuery.eq('stock_actual', stockAnteriorOriginal)
+        const { data: varianteActualizada, error: stockError } = await updateStockQuery
+          .select('id')
+          .maybeSingle()
+        if (stockError) throw stockError
+        if (!varianteActualizada) {
+          throw new Error('El stock cambió durante la anulación. Actualiza e inténtalo de nuevo.')
+        }
+        stockActualizado.push({
+          varianteId,
+          stockAnteriorOriginal,
+          stockNuevo,
+          cantidad
+        })
+      }
+
+      const updateFactura = getAnulacionUpdate(facturaActual, motivoAnulacion)
+      let facturaUpdateQuery = supabase
+        .from('facturas')
+        .update(updateFactura)
+        .eq('id', facturaId)
+      if (Object.prototype.hasOwnProperty.call(facturaActual, 'estado')) {
+        facturaUpdateQuery =
+          facturaActual.estado === null
+            ? facturaUpdateQuery.is('estado', null)
+            : facturaUpdateQuery.eq('estado', facturaActual.estado)
+      } else {
+        facturaUpdateQuery =
+          facturaActual.estado_pago === null
+            ? facturaUpdateQuery.is('estado_pago', null)
+            : facturaUpdateQuery.eq('estado_pago', facturaActual.estado_pago)
+      }
+      const { data: facturaActualizada, error: actualizarFacturaError } =
+        await facturaUpdateQuery.select('id').maybeSingle()
+      if (actualizarFacturaError) throw actualizarFacturaError
+      if (!facturaActualizada) {
+        throw new Error('La factura cambió durante la anulación. Actualiza e inténtalo de nuevo.')
+      }
+      facturaMarcada = true
+
+      if (stockActualizado.length > 0) {
+        const { error: movimientoError } = await supabase
+          .from('movimientos_inventario')
+          .insert(
+            stockActualizado.map(({ varianteId, cantidad }) => ({
+              variante_id: varianteId,
+              tipo: 'Entrada',
+              cantidad,
+              motivo: `Anulación factura #${numero}${
+                motivoAnulacion.trim() ? `: ${motivoAnulacion.trim()}` : ''
+              }`
+            }))
+          )
+        movimientosError = movimientoError
+      }
+    } catch (error) {
+      const rollbackErrors = []
+      for (const {
+        varianteId,
+        stockAnteriorOriginal,
+        stockNuevo
+      } of stockActualizado.reverse()) {
+        const rollbackQuery = supabase
+          .from('variantes')
+          .update({ stock_actual: stockAnteriorOriginal })
+          .eq('id', varianteId)
+          .eq('stock_actual', stockNuevo)
+        const { data: varianteRevertida, error: rollbackError } = await rollbackQuery
+          .select('id')
+          .maybeSingle()
+        if (rollbackError || !varianteRevertida) {
+          rollbackErrors.push(
+            rollbackError?.message || `No se pudo revertir el stock de la variante ${varianteId}.`
+          )
+        }
+      }
+
+      if (facturaMarcada) {
+        const rollbackFactura = Object.prototype.hasOwnProperty.call(facturaActual, 'estado')
+          ? { estado: facturaActual.estado }
+          : { estado_pago: facturaActual.estado_pago }
+        if (Object.prototype.hasOwnProperty.call(facturaActual, 'anulada_en')) {
+          rollbackFactura.anulada_en = facturaActual.anulada_en
+        }
+        if (Object.prototype.hasOwnProperty.call(facturaActual, 'motivo_anulacion')) {
+          rollbackFactura.motivo_anulacion = facturaActual.motivo_anulacion
+        }
+        const rollbackStatus = Object.prototype.hasOwnProperty.call(facturaActual, 'estado')
+          ? 'estado'
+          : 'estado_pago'
+        const rollbackStatusValue =
+          rollbackStatus === 'estado' ? 'anulada' : 'Anulada'
+        const { error: rollbackFacturaError } = await supabase
+          .from('facturas')
+          .update(rollbackFactura)
+          .eq('id', facturaId)
+          .eq(rollbackStatus, rollbackStatusValue)
+        if (rollbackFacturaError) rollbackErrors.push(rollbackFacturaError.message)
+      }
+
+      await cargarFacturas()
+      if (rollbackErrors.length > 0) {
+        showFeedback(
+          'error',
+          `${error.message || 'No se pudo anular la factura.'} También hubo errores al revertir los cambios: ${rollbackErrors.join('; ')}`
+        )
+      } else {
+        showFeedback('error', error.message || 'No se pudo anular la factura.')
+      }
+      setAnulandoFacturaId(null)
+      return
+    }
+
+    setFacturaAnular(null)
+    setMotivoAnulacion('')
+    await cargarFacturas()
+    if (onInventoryUpdated) {
+      try {
+        await onInventoryUpdated()
+      } catch (error) {
+        showFeedback(
+          'error',
+          `La factura fue anulada, pero no se pudieron recargar los datos: ${error.message}`
+        )
+        setAnulandoFacturaId(null)
+        return
+      }
+    }
+    showFeedback(
+      movimientosError
+        ? 'error'
+        : 'success',
+      movimientosError
+        ? `Factura #${numero} anulada y stock devuelto, pero no se pudo registrar el movimiento: ${movimientosError.message}`
+        : `Factura #${numero} anulada y stock devuelto.`
+    )
+    setAnulandoFacturaId(null)
+  }
 
   const obtenerNombreItem = (det) => {
     const prod = det?.variantes?.productos?.nombre || 'Artículo'
@@ -127,7 +337,9 @@ export default function HistorialFacturas({ storeConfig = {} }) {
       String(f.id ?? '').toLowerCase().includes(texto) ||
       nombreCliente.toLowerCase().includes(texto) ||
       String(f.metodo_pago ?? '').toLowerCase().includes(texto) ||
-      String(f.estado_pago ?? '').toLowerCase().includes(texto)
+      String(f.estado_pago ?? '').toLowerCase().includes(texto) ||
+      String(f.estado ?? '').toLowerCase().includes(texto) ||
+      String(f.motivo_anulacion ?? '').toLowerCase().includes(texto)
 
     const fechaReg = getLocalDateKey(f.fecha)
     const coincideFecha =
@@ -259,6 +471,18 @@ export default function HistorialFacturas({ storeConfig = {} }) {
           {errorMsg}
         </div>
       )}
+      {feedback && (
+        <div
+          className={`p-3 rounded-lg text-sm border ${
+            feedback.type === 'success'
+              ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+              : 'bg-red-50 text-red-700 border-red-200'
+          }`}
+          role="status"
+        >
+          {feedback.message}
+        </div>
+      )}
 
       {/* Tabla */}
       <div className="bg-white rounded-xl shadow-sm border overflow-x-auto">
@@ -291,15 +515,22 @@ export default function HistorialFacturas({ storeConfig = {} }) {
                   </td>
                   <td className="py-3 px-4">{f.clientes?.nombre || 'Consumidor Final'}</td>
                   <td className="py-3 px-4">
-                    <span
-                      className={`font-medium ${
-                        f.estado_pago === 'Parcial' ? 'text-red-600' : ''
-                      }`}
-                    >
-                      {f.estado_pago || 'Pagada'}
-                    </span>
+                    {isFacturaAnulada(f) ? (
+                      <span className="inline-flex rounded-md bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-700">
+                        Anulada
+                      </span>
+                    ) : (
+                      <span className="font-medium">
+                        {f.estado_pago || 'Pagada'}
+                      </span>
+                    )}
                     <span className="text-gray-400"> · </span>
                     <span className="text-gray-600">{f.metodo_pago || 'Efectivo'}</span>
+                    {f.motivo_anulacion && (
+                      <p className="text-xs text-gray-500 mt-1">
+                        Motivo: {f.motivo_anulacion}
+                      </p>
+                    )}
                   </td>
                   <td className="py-3 px-4 text-right font-semibold">
                     ${Number(f.total || 0).toFixed(2)}
@@ -320,6 +551,24 @@ export default function HistorialFacturas({ storeConfig = {} }) {
                         <MessageCircle className="w-3.5 h-3.5" />
                         WhatsApp
                       </button>
+                      {isFacturaAnulada(f) ? (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-red-50 text-red-700 text-xs font-semibold">
+                          Anulada
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setFacturaAnular(f)
+                            setMotivoAnulacion('')
+                          }}
+                          disabled={Boolean(anulandoFacturaId)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-red-50 text-red-700 hover:bg-red-100 disabled:opacity-50 text-xs font-medium"
+                        >
+                          <Ban className="w-3.5 h-3.5" />
+                          Anular
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -328,6 +577,83 @@ export default function HistorialFacturas({ storeConfig = {} }) {
           </table>
         )}
       </div>
+
+      {facturaAnular && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl max-w-lg w-full p-5 shadow-lg space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b pb-3">
+              <h3 className="font-bold text-gray-800">Confirmar anulación</h3>
+              <button
+                type="button"
+                onClick={() => setFacturaAnular(null)}
+                disabled={Boolean(anulandoFacturaId)}
+                className="p-1 rounded-lg hover:bg-gray-100 disabled:opacity-50"
+                aria-label="Cerrar confirmación"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-1 text-sm">
+              <p>
+                <span className="font-semibold">Factura:</span> #
+                {facturaAnular.numero_factura ?? facturaAnular.id}
+              </p>
+              <p>
+                <span className="font-semibold">Cliente:</span>{' '}
+                {facturaAnular.clientes?.nombre || 'Consumidor Final'}
+              </p>
+            </div>
+
+            <div className="rounded-lg border border-slate-200 divide-y max-h-52 overflow-y-auto">
+              {(facturaAnular.detalle_facturas || []).length === 0 ? (
+                <p className="p-3 text-sm text-gray-500">La factura no tiene artículos.</p>
+              ) : (
+                facturaAnular.detalle_facturas.map((detalle) => (
+                  <div key={detalle.id} className="p-3 flex justify-between gap-3 text-sm">
+                    <span>{obtenerNombreItem(detalle)}</span>
+                    <span className="font-semibold shrink-0">
+                      {Number(detalle.cantidad || 0)} und. al stock
+                    </span>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <label className="block text-sm font-medium text-gray-700">
+              Motivo de anulación (opcional)
+              <textarea
+                value={motivoAnulacion}
+                onChange={(event) => setMotivoAnulacion(event.target.value)}
+                rows={3}
+                disabled={Boolean(anulandoFacturaId)}
+                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                placeholder="Escribe el motivo..."
+              />
+            </label>
+
+            <div className="flex flex-col-reverse sm:flex-row justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setFacturaAnular(null)}
+                disabled={Boolean(anulandoFacturaId)}
+                className="px-4 py-2 rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200 text-sm font-medium disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={anularFactura}
+                disabled={Boolean(anulandoFacturaId)}
+                className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700 text-sm font-semibold disabled:opacity-50"
+              >
+                <Ban className="w-4 h-4" />
+                {anulandoFacturaId ? 'Anulando...' : 'Confirmar anulación'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal de Recibo / Reimpresión */}
       {facturaSeleccionada && (
@@ -402,10 +728,14 @@ export default function HistorialFacturas({ storeConfig = {} }) {
                     Pago: {facturaSeleccionada.metodo_pago || 'Efectivo'} (
                     <span
                       className={
-                        facturaSeleccionada.estado_pago === 'Parcial' ? 'text-red-600' : ''
+                        isFacturaAnulada(facturaSeleccionada)
+                          ? 'text-red-600 font-semibold'
+                          : ''
                       }
                     >
-                      {facturaSeleccionada.estado_pago || 'Pagada'}
+                      {isFacturaAnulada(facturaSeleccionada)
+                        ? 'Anulada'
+                        : facturaSeleccionada.estado_pago || 'Pagada'}
                     </span>
                     )
                   </span>

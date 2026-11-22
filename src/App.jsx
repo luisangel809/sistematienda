@@ -6,6 +6,7 @@ import InventarioManager from './components/InventarioManager'
 import DashboardStats from './components/DashboardStats'
 import SettingsMenu from './components/SettingsMenu'
 import { formatWhatsAppPhone } from './utils/phone'
+import { isFacturaAnulada } from './utils/facturas'
 import {
   ShoppingBag,
   PackagePlus,
@@ -243,10 +244,7 @@ export default function App() {
           nombre,
           telefono,
           notas,
-          facturas (
-            total,
-            monto_pagado
-          )
+          facturas (*)
         `)
         .order('nombre'),
       supabase
@@ -281,7 +279,11 @@ export default function App() {
     if (clis) {
       const clientesConDeuda = clis.map((c) => {
         const deuda = (c.facturas || []).reduce(
-          (acc, f) => acc + Math.max(0, Number(f.total || 0) - Number(f.monto_pagado || 0)),
+          (acc, f) =>
+            acc +
+            (isFacturaAnulada(f)
+              ? 0
+              : Math.max(0, Number(f.total || 0) - Number(f.monto_pagado || 0))),
           0
         )
         return { ...c, deuda }
@@ -1268,7 +1270,12 @@ export default function App() {
 
         {activeTab === 'clientes' && <ClientesAbonos onClientesUpdated={loadStoreData} />}
 
-        {activeTab === 'historial' && <HistorialFacturas storeConfig={storeConfig} />}
+        {activeTab === 'historial' && (
+          <HistorialFacturas
+            storeConfig={storeConfig}
+            onInventoryUpdated={loadStoreData}
+          />
+        )}
 
         {activeTab === 'dashboard' && <DashboardStats variantes={variantes} />}
       </main>

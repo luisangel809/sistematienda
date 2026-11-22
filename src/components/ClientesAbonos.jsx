@@ -1,6 +1,7 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../supabase'
 import { formatWhatsAppPhone } from '../utils/phone'
+import { isFacturaAnulada } from '../utils/facturas'
 import {
   UserPlus,
   Search,
@@ -30,6 +31,8 @@ export default function ClientesAbonos({ onClientesUpdated }) {
   const [telefono, setTelefono] = useState('')
   const [notas, setNotas] = useState('')
   const [guardando, setGuardando] = useState(false)
+  const [formularioClienteAbierto, setFormularioClienteAbierto] = useState(false)
+  const formularioClienteRef = useRef(null)
   const [feedback, setFeedback] = useState(null)
 
   // Modal de abono / detalle de deuda
@@ -38,6 +41,12 @@ export default function ClientesAbonos({ onClientesUpdated }) {
   const [montoAbono, setMontoAbono] = useState('')
   const [metodoAbono, setMetodoAbono] = useState('Efectivo')
   const [procesandoAbono, setProcesandoAbono] = useState(false)
+
+  useEffect(() => {
+    if (formularioClienteAbierto) {
+      formularioClienteRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }
+  }, [formularioClienteAbierto])
 
   const showToast = (type, message) => {
     setFeedback({ type, message })
@@ -55,13 +64,7 @@ export default function ClientesAbonos({ onClientesUpdated }) {
         notas,
         creado_en,
         facturas (
-          id,
-          numero_factura,
-          total,
-          monto_pagado,
-          estado_pago,
-          metodo_pago,
-          fecha,
+          *,
           abonos (
             id,
             monto,
@@ -79,7 +82,7 @@ export default function ClientesAbonos({ onClientesUpdated }) {
         const facturasConSaldo = (c.facturas || []).map((f) => {
           const total = Number(f.total || 0)
           const pagado = Number(f.monto_pagado || 0)
-          const pendiente = Math.max(0, total - pagado)
+          const pendiente = isFacturaAnulada(f) ? 0 : Math.max(0, total - pagado)
           return { ...f, totalNum: total, pagadoNum: pagado, pendiente }
         })
         const deudaTotal = facturasConSaldo.reduce((acc, f) => acc + f.pendiente, 0)
@@ -126,6 +129,7 @@ export default function ClientesAbonos({ onClientesUpdated }) {
     setNombre('')
     setTelefono('')
     setNotas('')
+    setFormularioClienteAbierto(false)
     showToast('success', 'Cliente registrado correctamente.')
     await cargarClientes()
     if (onClientesUpdated) onClientesUpdated()
@@ -236,16 +240,38 @@ export default function ClientesAbonos({ onClientesUpdated }) {
         </div>
       </div>
 
+      <button
+        type="button"
+        onClick={() => setFormularioClienteAbierto(true)}
+        className="w-full sm:w-auto rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-semibold py-3 px-4 text-sm flex items-center justify-center gap-2 shadow-sm cursor-pointer"
+      >
+        <UserPlus className="w-5 h-5" />
+        Nuevo cliente
+      </button>
+
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
         {/* Formulario Nuevo Cliente */}
         <form
+          ref={formularioClienteRef}
           onSubmit={handleCrearCliente}
-          className="lg:col-span-4 bg-white rounded-2xl border border-slate-200 p-4 space-y-3 h-fit"
+          className={`lg:col-span-4 bg-white rounded-2xl border border-slate-200 p-4 space-y-3 h-fit ${
+            formularioClienteAbierto ? 'block' : 'hidden'
+          }`}
         >
-          <h3 className="font-bold text-sm flex items-center gap-2 text-slate-900">
-            <UserPlus className="w-4 h-4 text-rose-600" />
-            Registrar Cliente
-          </h3>
+          <div className="flex items-center justify-between">
+            <h3 className="font-bold text-sm flex items-center gap-2 text-slate-900">
+              <UserPlus className="w-4 h-4 text-rose-600" />
+              Registrar Cliente
+            </h3>
+            <button
+              type="button"
+              onClick={() => setFormularioClienteAbierto(false)}
+              className="p-1 rounded-lg hover:bg-slate-100 text-slate-500 cursor-pointer"
+              aria-label="Cerrar formulario de nuevo cliente"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
 
           <div>
             <label className="block text-xs font-medium text-slate-700 mb-1">
@@ -297,7 +323,11 @@ export default function ClientesAbonos({ onClientesUpdated }) {
         </form>
 
         {/* Listado de Clientes */}
-        <div className="lg:col-span-8 space-y-3">
+        <div
+          className={`${
+            formularioClienteAbierto ? 'lg:col-span-8' : 'lg:col-span-12'
+          } space-y-3`}
+        >
           <div className="bg-white rounded-2xl border border-slate-200 p-3 flex flex-wrap items-center gap-3">
             <div className="relative flex-1 min-w-48">
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -486,12 +516,14 @@ export default function ClientesAbonos({ onClientesUpdated }) {
                       </div>
                       <span
                         className={`px-2 py-0.5 rounded-md font-semibold ${
-                          f.pendiente > 0
+                          isFacturaAnulada(f)
+                            ? 'bg-red-100 text-red-700'
+                            : f.pendiente > 0
                             ? 'bg-amber-100 text-amber-800'
                             : 'bg-emerald-100 text-emerald-800'
                         }`}
                       >
-                        {f.estado_pago}
+                        {isFacturaAnulada(f) ? 'Anulada' : f.estado_pago}
                       </span>
                     </div>
 
@@ -503,7 +535,7 @@ export default function ClientesAbonos({ onClientesUpdated }) {
                       </span>
                     </div>
 
-                    {f.pendiente > 0 && (
+                    {!isFacturaAnulada(f) && f.pendiente > 0 && (
                       <button
                         onClick={() => {
                           setFacturaAbono(f)

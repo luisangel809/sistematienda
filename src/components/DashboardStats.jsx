@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../supabase'
+import { isFacturaAnulada } from '../utils/facturas'
 import {
   BarChart3,
   DollarSign,
@@ -98,8 +99,10 @@ export default function DashboardStats({ variantes = [] }) {
       return parsed >= startDate
     }
 
-    const facturasFiltradas = facturas.filter((f) => inRange(f))
+    const facturasActivas = facturas.filter((f) => !isFacturaAnulada(f))
+    const facturasFiltradas = facturasActivas.filter((f) => inRange(f))
     const facturaIdsEnRango = new Set(facturasFiltradas.map((f) => f.id))
+    const facturasActivasIds = new Set(facturasActivas.map((f) => f.id))
 
     const vendidoTotal = facturasFiltradas.reduce(
       (acc, f) => acc + Number(f.total || 0),
@@ -108,7 +111,9 @@ export default function DashboardStats({ variantes = [] }) {
 
     // Cobrado: si la factura ya tiene monto_pagado registrado, lo sumamos;
     // y si hay abonos posteriores registrados en la tabla abonos, también los consideramos.
-    const abonosEnRango = abonos.filter((a) => inRange(a))
+    const abonosEnRango = abonos.filter(
+      (a) => facturasActivasIds.has(a.factura_id) && inRange(a)
+    )
     const totalAbonosRango = abonosEnRango.reduce(
       (acc, a) => acc + Number(a.monto || 0),
       0
@@ -130,7 +135,7 @@ export default function DashboardStats({ variantes = [] }) {
     )
     const gananciaBruta = vendidoTotal - costoVendido
 
-    const porCobrarTotal = facturas.reduce(
+    const porCobrarTotal = facturasActivas.reduce(
       (acc, f) => acc + Math.max(0, Number(f.total || 0) - Number(f.monto_pagado || 0)),
       0
     )
@@ -146,7 +151,7 @@ export default function DashboardStats({ variantes = [] }) {
       dayMap.set(key, { key, label, vendido: 0, cobrado: 0 })
     }
 
-    facturas.forEach((f) => {
+    facturasActivas.forEach((f) => {
       const rawDate = getDateValue(f)
       if (!rawDate) return
       const parsed = new Date(rawDate)
