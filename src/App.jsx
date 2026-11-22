@@ -4,6 +4,7 @@ import HistorialFacturas from './components/HistorialFacturas'
 import ClientesAbonos from './components/ClientesAbonos'
 import InventarioManager from './components/InventarioManager'
 import DashboardStats from './components/DashboardStats'
+import { formatWhatsAppPhone } from './utils/phone'
 import {
   LogOut,
   ShoppingBag,
@@ -465,7 +466,7 @@ export default function App() {
             .from('clientes')
             .update({
               nombre: customerName.trim(),
-              telefono: customerPhone.trim() || null
+              telefono: formatWhatsAppPhone(customerPhone) || null
             })
             .eq('id', clienteId)
         }
@@ -475,7 +476,7 @@ export default function App() {
           .insert([
             {
               nombre: customerName.trim(),
-              telefono: customerPhone.trim() || null
+              telefono: formatWhatsAppPhone(customerPhone) || null
             }
           ])
           .select()
@@ -551,7 +552,7 @@ export default function App() {
         numero: factura.numero_factura,
         fecha: new Date().toLocaleString('es-DO'),
         cliente: customerName.trim() || 'Cliente general',
-        telefono: customerPhone.trim(),
+        telefono: formatWhatsAppPhone(customerPhone),
         items: cart.map((i) => ({
           nombre: i.variante.productos?.nombre,
           detalle: [i.variante.talla, i.variante.color, i.variante.presentacion]
@@ -602,9 +603,9 @@ export default function App() {
       `Pagado: ${formatMoney(r.pagado)} (${r.metodoPago})`,
       ...(r.pendiente > 0 ? [`Saldo pendiente: *${formatMoney(r.pendiente)}*`] : [])
     ]
-    const phoneDigits = (r.telefono || '').replace(/\D/g, '')
-    const url = phoneDigits
-      ? `https://wa.me/${phoneDigits}?text=${encodeURIComponent(lines.join('\n'))}`
+    const phone = formatWhatsAppPhone(r.telefono)
+    const url = phone
+      ? `https://wa.me/${phone}?text=${encodeURIComponent(lines.join('\n'))}`
       : `https://wa.me/?text=${encodeURIComponent(lines.join('\n'))}`
     window.open(url, '_blank', 'noopener,noreferrer')
   }

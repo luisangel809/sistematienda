@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../supabase'
+import { formatWhatsAppPhone } from '../utils/phone'
 import {
   UserPlus,
   Search,
@@ -111,7 +112,7 @@ export default function ClientesAbonos({ onClientesUpdated }) {
     const { error } = await supabase.from('clientes').insert([
       {
         nombre: nombre.trim(),
-        telefono: telefono.trim() || null,
+        telefono: formatWhatsAppPhone(telefono) || null,
         notas: notas.trim() || null
       }
     ])

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../supabase'
 import { Search, Printer, MessageCircle, Eye, X, RefreshCw } from 'lucide-react'
+import { formatWhatsAppPhone } from '../utils/phone'
 
 export default function HistorialFacturas() {
   const [facturas, setFacturas] = useState([])
@@ -124,7 +125,7 @@ export default function HistorialFacturas() {
       `*Total: $${total}*%0A` +
       `Pagado: $${pagado} (${factura.metodo_pago || 'Efectivo'} - ${factura.estado_pago || 'Pagada'})`
 
-    const tel = String(factura.clientes?.telefono || '').replace(/\D/g, '')
+    const tel = formatWhatsAppPhone(factura.clientes?.telefono)
     const url = tel
       ? `https://wa.me/${tel}?text=${msg}`
       : `https://wa.me/?text=${msg}`
@@ -207,7 +208,13 @@ export default function HistorialFacturas() {
                   </td>
                   <td className="py-3 px-4">{f.clientes?.nombre || 'Consumidor Final'}</td>
                   <td className="py-3 px-4">
-                    <span className="font-medium">{f.estado_pago || 'Pagada'}</span>
+                    <span
+                      className={`font-medium ${
+                        f.estado_pago === 'Parcial' ? 'text-red-600' : ''
+                      }`}
+                    >
+                      {f.estado_pago || 'Pagada'}
+                    </span>
                     <span className="text-gray-400"> · </span>
                     <span className="text-gray-600">{f.metodo_pago || 'Efectivo'}</span>
                   </td>
@@ -309,7 +316,15 @@ export default function HistorialFacturas() {
                 </div>
                 <div className="flex justify-between text-xs text-gray-500 pt-1">
                   <span>
-                    Pago: {facturaSeleccionada.metodo_pago || 'Efectivo'} ({facturaSeleccionada.estado_pago || 'Pagada'})
+                    Pago: {facturaSeleccionada.metodo_pago || 'Efectivo'} (
+                    <span
+                      className={
+                        facturaSeleccionada.estado_pago === 'Parcial' ? 'text-red-600' : ''
+                      }
+                    >
+                      {facturaSeleccionada.estado_pago || 'Pagada'}
+                    </span>
+                    )
                   </span>
                   <span>
                     Pagado: ${Number(facturaSeleccionada.monto_pagado ?? facturaSeleccionada.total ?? 0).toFixed(2)}
