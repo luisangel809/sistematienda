@@ -9,6 +9,12 @@ El catálogo está disponible en `/catalogo`. En Supabase, ejecuta una vez
 de los datos públicos del catálogo. La configuración de Vercel reescribe esa ruta a la aplicación
 de una sola página.
 
+## Estado de clientes
+
+En Supabase, ejecuta [`supabase/clientes-activo.sql`](./supabase/clientes-activo.sql) para agregar
+el estado `activo` a los clientes existentes. Los nuevos clientes se crean activos y los inactivos
+se conservan para consultar su historial sin permitir nuevas facturas.
+
 Currently, two official plugins are available:
 
 - [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)

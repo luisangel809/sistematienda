@@ -7,10 +7,12 @@ import {
   Search,
   Phone,
   DollarSign,
-  CheckCircle2,
   X,
   RefreshCw,
-  FileText
+  FileText,
+  Pencil,
+  UserCheck,
+  UserX
 } from 'lucide-react'
 
 const formatMoney = (amount) =>
@@ -25,12 +27,15 @@ export default function ClientesAbonos({ onClientesUpdated }) {
   const [loading, setLoading] = useState(true)
   const [busqueda, setBusqueda] = useState('')
   const [soloConDeuda, setSoloConDeuda] = useState(false)
+  const [mostrarInactivos, setMostrarInactivos] = useState(false)
 
-  // Nuevo cliente
+  // Formulario de cliente
   const [nombre, setNombre] = useState('')
   const [telefono, setTelefono] = useState('')
   const [notas, setNotas] = useState('')
+  const [clienteEditandoId, setClienteEditandoId] = useState(null)
   const [guardando, setGuardando] = useState(false)
+  const [clienteActualizandoId, setClienteActualizandoId] = useState(null)
   const [formularioClienteAbierto, setFormularioClienteAbierto] = useState(false)
   const formularioClienteRef = useRef(null)
   const [feedback, setFeedback] = useState(null)
@@ -63,6 +68,7 @@ export default function ClientesAbonos({ onClientesUpdated }) {
         telefono,
         notas,
         creado_en,
+        activo,
         facturas (
           *,
           abonos (
@@ -107,18 +113,24 @@ export default function ClientesAbonos({ onClientesUpdated }) {
     cargarClientes()
   }, [])
 
-  const handleCrearCliente = async (e) => {
+  const handleGuardarCliente = async (e) => {
     e.preventDefault()
     if (!nombre.trim()) return
 
     setGuardando(true)
-    const { error } = await supabase.from('clientes').insert([
-      {
-        nombre: nombre.trim(),
-        telefono: formatWhatsAppPhone(telefono) || null,
-        notas: notas.trim() || null
-      }
-    ])
+    const datosCliente = {
+      nombre: nombre.trim(),
+      telefono: formatWhatsAppPhone(telefono) || null,
+      notas: notas.trim() || null
+    }
+    const { error } = clienteEditandoId
+      ? await supabase
+          .from('clientes')
+          .update(datosCliente)
+          .eq('id', clienteEditandoId)
+          .select('id')
+          .single()
+      : await supabase.from('clientes').insert([{ ...datosCliente, activo: true }])
     setGuardando(false)
 
     if (error) {
@@ -129,10 +141,60 @@ export default function ClientesAbonos({ onClientesUpdated }) {
     setNombre('')
     setTelefono('')
     setNotas('')
+    setClienteEditandoId(null)
     setFormularioClienteAbierto(false)
-    showToast('success', 'Cliente registrado correctamente.')
+    showToast(
+      'success',
+      clienteEditandoId ? 'Cliente actualizado correctamente.' : 'Cliente registrado correctamente.'
+    )
     await cargarClientes()
     if (onClientesUpdated) onClientesUpdated()
+  }
+
+  const handleEditarCliente = (cliente) => {
+    setClienteEditandoId(cliente.id)
+    setNombre(cliente.nombre || '')
+    setTelefono(cliente.telefono || '')
+    setNotas(cliente.notas || '')
+    setFormularioClienteAbierto(true)
+  }
+
+  const handleCambiarEstado = async (cliente) => {
+    const activar = cliente.activo === false
+    if (!activar && !window.confirm(`¿Desactivar a ${cliente.nombre}?`)) return
+
+    setClienteActualizandoId(cliente.id)
+    let error
+    try {
+      const resultado = await supabase
+        .from('clientes')
+        .update({ activo: activar })
+        .eq('id', cliente.id)
+        .select('id')
+        .single()
+      error = resultado.error
+    } catch (err) {
+      error = err
+    } finally {
+      setClienteActualizandoId(null)
+    }
+
+    if (error) {
+      showToast('error', error.message)
+      return
+    }
+
+    showToast('success', activar ? 'Cliente activado.' : 'Cliente desactivado.')
+    await cargarClientes()
+    if (onClientesUpdated) onClientesUpdated()
+  }
+
+  const handleNuevoCliente = () => {
+    setClienteEditandoId(null)
+    setNombre('')
+    setTelefono('')
+    setNotas('')
+    setFormularioClienteAbierto(true)
   }
 
   const handleRegistrarAbono = async (e) => {
@@ -187,6 +249,7 @@ export default function ClientesAbonos({ onClientesUpdated }) {
 
   const clientesFiltrados = useMemo(() => {
     return clientes.filter((c) => {
+      if (!mostrarInactivos && c.activo === false) return false
       if (soloConDeuda && c.deudaTotal <= 0) return false
       const q = busqueda.trim().toLowerCase()
       if (!q) return true
@@ -196,7 +259,7 @@ export default function ClientesAbonos({ onClientesUpdated }) {
         (c.notas || '').toLowerCase().includes(q)
       )
     })
-  }, [clientes, busqueda, soloConDeuda])
+  }, [clientes, busqueda, soloConDeuda, mostrarInactivos])
 
   const totalPorCobrar = useMemo(
     () => clientes.reduce((acc, c) => acc + c.deudaTotal, 0),
@@ -242,7 +305,7 @@ export default function ClientesAbonos({ onClientesUpdated }) {
 
       <button
         type="button"
-        onClick={() => setFormularioClienteAbierto(true)}
+        onClick={handleNuevoCliente}
         className="w-full sm:w-auto rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-semibold py-3 px-4 text-sm flex items-center justify-center gap-2 shadow-sm cursor-pointer"
       >
         <UserPlus className="w-5 h-5" />
@@ -250,24 +313,31 @@ export default function ClientesAbonos({ onClientesUpdated }) {
       </button>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-        {/* Formulario Nuevo Cliente */}
+        {/* Formulario de cliente */}
         <form
           ref={formularioClienteRef}
-          onSubmit={handleCrearCliente}
+          onSubmit={handleGuardarCliente}
           className={`lg:col-span-4 bg-white rounded-2xl border border-slate-200 p-4 space-y-3 h-fit ${
             formularioClienteAbierto ? 'block' : 'hidden'
           }`}
         >
           <div className="flex items-center justify-between">
             <h3 className="font-bold text-sm flex items-center gap-2 text-slate-900">
-              <UserPlus className="w-4 h-4 text-rose-600" />
-              Registrar Cliente
+              {clienteEditandoId ? (
+                <Pencil className="w-4 h-4 text-rose-600" />
+              ) : (
+                <UserPlus className="w-4 h-4 text-rose-600" />
+              )}
+              {clienteEditandoId ? 'Editar Cliente' : 'Registrar Cliente'}
             </h3>
             <button
               type="button"
-              onClick={() => setFormularioClienteAbierto(false)}
               className="p-1 rounded-lg hover:bg-slate-100 text-slate-500 cursor-pointer"
-              aria-label="Cerrar formulario de nuevo cliente"
+              aria-label="Cerrar formulario de cliente"
+              onClick={() => {
+                setFormularioClienteAbierto(false)
+                setClienteEditandoId(null)
+              }}
             >
               <X className="w-5 h-5" />
             </button>
@@ -318,7 +388,11 @@ export default function ClientesAbonos({ onClientesUpdated }) {
             disabled={guardando}
             className="w-full rounded-xl bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white font-semibold py-2.5 text-sm cursor-pointer"
           >
-            {guardando ? 'Guardando...' : 'Guardar Cliente'}
+            {guardando
+              ? 'Guardando...'
+              : clienteEditandoId
+              ? 'Guardar cambios'
+              : 'Guardar Cliente'}
           </button>
         </form>
 
@@ -349,6 +423,16 @@ export default function ClientesAbonos({ onClientesUpdated }) {
               />
               Solo con saldo pendiente
             </label>
+
+            <label className="inline-flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={mostrarInactivos}
+                onChange={(e) => setMostrarInactivos(e.target.checked)}
+                className="rounded text-rose-600"
+              />
+              Mostrar inactivos
+            </label>
           </div>
 
           <div className="bg-white rounded-2xl border border-slate-200 divide-y divide-slate-100">
@@ -365,7 +449,14 @@ export default function ClientesAbonos({ onClientesUpdated }) {
                   className="p-4 flex flex-wrap items-center justify-between gap-3 hover:bg-slate-50"
                 >
                   <div className="space-y-0.5">
-                    <p className="font-semibold text-sm text-slate-900">{c.nombre}</p>
+                    <div className="flex items-center gap-2">
+                      <p className="font-semibold text-sm text-slate-900">{c.nombre}</p>
+                      {c.activo === false && (
+                        <span className="rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600">
+                          Inactivo
+                        </span>
+                      )}
+                    </div>
                     <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500">
                       {c.telefono && (
                         <span className="inline-flex items-center gap-1">
@@ -390,16 +481,48 @@ export default function ClientesAbonos({ onClientesUpdated }) {
                       </p>
                     </div>
 
-                    <button
-                      onClick={() => {
-                        setClienteActivo(c)
-                        setFacturaAbono(null)
-                      }}
-                      className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <FileText className="w-3.5 h-3.5" />
-                      Ver Cuenta
-                    </button>
+                    <div className="flex flex-wrap items-center justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleEditarCliente(c)}
+                        className="px-3 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                        Editar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setClienteActivo(c)
+                          setFacturaAbono(null)
+                        }}
+                        className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <FileText className="w-3.5 h-3.5" />
+                        Ver Cuenta
+                      </button>
+                      <button
+                        type="button"
+                        disabled={clienteActualizandoId === c.id}
+                        onClick={() => handleCambiarEstado(c)}
+                        className={`px-3 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer disabled:opacity-50 ${
+                          c.activo === false
+                            ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700'
+                            : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                        }`}
+                      >
+                        {c.activo === false ? (
+                          <UserCheck className="w-3.5 h-3.5" />
+                        ) : (
+                          <UserX className="w-3.5 h-3.5" />
+                        )}
+                        {clienteActualizandoId === c.id
+                          ? 'Actualizando...'
+                          : c.activo === false
+                          ? 'Activar'
+                          : 'Desactivar'}
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))

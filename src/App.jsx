@@ -245,6 +245,7 @@ export default function App() {
           nombre,
           telefono,
           notas,
+          activo,
           facturas (*)
         `)
         .order('nombre'),
@@ -344,10 +345,25 @@ export default function App() {
     return clientesList
       .filter(
         (c) =>
-          (c.nombre || '').toLowerCase().includes(q) ||
-          (c.telefono || '').toLowerCase().includes(q)
+          c.activo !== false &&
+          ((c.nombre || '').toLowerCase().includes(q) ||
+            (c.telefono || '').toLowerCase().includes(q))
       )
       .slice(0, 6)
+  }, [clientesList, customerName, selectedClienteId])
+
+  const clienteInactivoEscrito = useMemo(() => {
+    const consulta = customerName.trim().toLowerCase()
+    if (!consulta || selectedClienteId) return null
+    return (
+      clientesList.find(
+        (cliente) =>
+          cliente.activo === false &&
+          [cliente.nombre, cliente.telefono].some(
+            (valor) => (valor || '').trim().toLowerCase() === consulta
+          )
+      ) || null
+    )
   }, [clientesList, customerName, selectedClienteId])
 
   const handleSelectClientePOS = (cliente) => {
@@ -356,6 +372,10 @@ export default function App() {
       setCustomerName('')
       setCustomerPhone('')
       setShowClienteSuggestions(false)
+      return
+    }
+    if (cliente.activo === false) {
+      showToast('error', 'Este cliente está inactivo y no se le puede facturar.')
       return
     }
     setSelectedClienteId(cliente.id)
@@ -483,20 +503,40 @@ export default function App() {
       )
       return
     }
+    if (clienteInactivoEscrito) {
+      showToast(
+        'error',
+        'Este cliente está inactivo y no se le puede facturar. Selecciona un cliente activo.'
+      )
+      return
+    }
 
     setProcessingSale(true)
     try {
       let clienteId = selectedClienteId || null
 
       if (clienteId) {
+        const { data: clienteActual, error: clienteErr } = await supabase
+          .from('clientes')
+          .select('activo')
+          .eq('id', clienteId)
+          .maybeSingle()
+        if (clienteErr) throw clienteErr
+        if (!clienteActual || clienteActual.activo === false) {
+          setSelectedClienteId('')
+          showToast('error', 'Este cliente está inactivo y no se le puede facturar.')
+          return
+        }
+
         if (customerName.trim()) {
-          await supabase
+          const { error: clienteUpdateErr } = await supabase
             .from('clientes')
             .update({
               nombre: customerName.trim(),
               telefono: formatWhatsAppPhone(customerPhone) || null
             })
             .eq('id', clienteId)
+          if (clienteUpdateErr) throw clienteUpdateErr
         }
       } else if (customerName.trim()) {
         const { data: cliData, error: cliErr } = await supabase
@@ -1144,6 +1184,12 @@ export default function App() {
                         className="rounded-xl border border-slate-200 px-3 py-2 text-xs"
                       />
                     </div>
+
+                    {clienteInactivoEscrito && (
+                      <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-700">
+                        {clienteInactivoEscrito.nombre} está inactivo y no se le puede facturar.
+                      </p>
+                    )}
 
                     {clienteSeleccionadoObj && (
                       <div className="rounded-xl bg-slate-50 border border-slate-200 p-2.5 text-xs space-y-1">
