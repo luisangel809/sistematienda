@@ -231,6 +231,7 @@ export default function App() {
             id,
             nombre,
             marca,
+            descripcion,
             categoria_id,
             categorias ( id, nombre )
           )

@@ -32,6 +32,7 @@ export default function InventarioManager({ categorias, variantes, onInventoryUp
   const [newProd, setNewProd] = useState({
     nombre: '',
     marca: '',
+    descripcion: '',
     categoria_id: categorias[0]?.id || '',
     presentacion: '',
     fecha_vencimiento: '',
@@ -160,6 +161,7 @@ export default function InventarioManager({ categorias, variantes, onInventoryUp
           {
             nombre: newProd.nombre.trim(),
             marca: newProd.marca.trim() || null,
+            descripcion: newProd.descripcion.trim() || null,
             categoria_id: selectedNewCategoryId || null
           }
         ])
@@ -207,6 +209,7 @@ export default function InventarioManager({ categorias, variantes, onInventoryUp
       setNewProd({
         nombre: '',
         marca: '',
+        descripcion: '',
         categoria_id: categorias[0]?.id || '',
         presentacion: '',
         fecha_vencimiento: '',
@@ -310,6 +313,7 @@ export default function InventarioManager({ categorias, variantes, onInventoryUp
       producto_id: v.producto_id,
       nombre: v.productos?.nombre || '',
       marca: v.productos?.marca || '',
+      descripcion: v.productos?.descripcion || '',
       categoria_id: v.productos?.categoria_id || '',
       categoria_nombre: v.productos?.categorias?.nombre || '',
       sku: v.sku || '',
@@ -343,6 +347,7 @@ export default function InventarioManager({ categorias, variantes, onInventoryUp
         .update({
           nombre: editingVar.nombre.trim(),
           marca: editingVar.marca.trim() || null,
+          descripcion: editingVar.descripcion.trim() || null,
           categoria_id: editingVar.categoria_id || null
         })
         .eq('id', editingVar.producto_id)
@@ -597,6 +602,22 @@ export default function InventarioManager({ categorias, variantes, onInventoryUp
               placeholder="Ej. Crema Hidratante Vitamina C"
               className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
             />
+          </div>
+
+          <div className="rounded-xl border border-rose-100 bg-rose-50/50 p-3">
+            <label className="block text-xs font-semibold text-slate-800 mb-1">
+              Descripción del producto (opcional)
+            </label>
+            <textarea
+              rows="3"
+              value={newProd.descripcion}
+              onChange={(e) => setNewProd({ ...newProd, descripcion: e.target.value })}
+              placeholder="Ej. Tela fresca, corte ajustado, ideal para uso diario..."
+              className="w-full resize-y rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+            />
+            <p className="mt-1 text-[11px] text-slate-500">
+              Se mostrará en el detalle del producto del catálogo público.
+            </p>
           </div>
 
           <div className="grid grid-cols-2 gap-2.5">
@@ -922,10 +943,10 @@ export default function InventarioManager({ categorias, variantes, onInventoryUp
                                 type="button"
                                 onClick={() => openEditModal(v)}
                                 className="px-2.5 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-semibold flex items-center gap-1 cursor-pointer"
-                                title="Editar variante"
+                                title="Editar producto y variante"
                               >
                                 <Pencil className="w-3.5 h-3.5" />
-                                Editar
+                                Editar producto
                               </button>
 
                               <button
@@ -957,7 +978,7 @@ export default function InventarioManager({ categorias, variantes, onInventoryUp
             className="bg-white rounded-2xl max-w-md w-full p-5 shadow-lg space-y-3 max-h-[90vh] overflow-y-auto"
           >
             <div className="flex items-center justify-between border-b border-slate-200 pb-3">
-              <h3 className="font-bold text-base text-slate-900">Editar Artículo</h3>
+              <h3 className="font-bold text-base text-slate-900">Editar producto y variante</h3>
               <button
                 type="button"
                 onClick={() => setEditingVar(null)}
@@ -1007,6 +1028,24 @@ export default function InventarioManager({ categorias, variantes, onInventoryUp
                 onChange={(e) => setEditingVar({ ...editingVar, nombre: e.target.value })}
                 className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
               />
+            </div>
+
+            <div className="rounded-xl border border-rose-100 bg-rose-50/50 p-3">
+              <label className="block text-xs font-semibold text-slate-800 mb-1">
+                Descripción del producto (opcional)
+              </label>
+              <textarea
+                rows="3"
+                value={editingVar.descripcion}
+                onChange={(e) =>
+                  setEditingVar({ ...editingVar, descripcion: e.target.value })
+                }
+                placeholder="Ej. Tela fresca, corte ajustado, ideal para uso diario..."
+                className="w-full resize-y rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+              />
+              <p className="mt-1 text-[11px] text-slate-500">
+                Se mostrará en el detalle del producto del catálogo público.
+              </p>
             </div>
 
             <div className="grid grid-cols-2 gap-2.5">

@@ -2,6 +2,13 @@
 
 This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
 
+## Catálogo digital público
+
+El catálogo está disponible en `/catalogo`. En Supabase, ejecuta una vez
+[`supabase/catalogo-publico.sql`](./supabase/catalogo-publico.sql) para habilitar lecturas anónimas
+de los datos públicos del catálogo. La configuración de Vercel reescribe esa ruta a la aplicación
+de una sola página.
+
 Currently, two official plugins are available:
 
 - [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)

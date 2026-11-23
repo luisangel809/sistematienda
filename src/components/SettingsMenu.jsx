@@ -10,7 +10,8 @@ import {
   X,
   Pencil,
   Trash2,
-  Plus
+  Plus,
+  Share2
 } from 'lucide-react'
 
 const EMPTY_PROFILE = {
@@ -251,6 +252,17 @@ export default function SettingsMenu({
     }
   }
 
+  const handleCopyCatalogLink = async () => {
+    setMenuOpen(false)
+    const catalogUrl = `${window.location.origin}/catalogo`
+    try {
+      await navigator.clipboard.writeText(catalogUrl)
+      onNotify('success', 'Enlace del catálogo copiado.')
+    } catch (error) {
+      onNotify('error', `No se pudo copiar el enlace del catálogo: ${error.message || error}`)
+    }
+  }
+
   return (
     <>
       <div className="relative" ref={menuRef}>
@@ -272,6 +284,9 @@ export default function SettingsMenu({
           >
             <MenuItem icon={Store} onClick={openProfile}>Mi Perfil</MenuItem>
             <MenuItem icon={Settings} onClick={openCategoryManager}>Categorías</MenuItem>
+            <MenuItem icon={Share2} onClick={handleCopyCatalogLink}>
+              Copiar link catálogo
+            </MenuItem>
             <MenuItem
               icon={Download}
               onClick={handleBackup}
