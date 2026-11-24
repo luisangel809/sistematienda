@@ -182,6 +182,7 @@ export default function App() {
   const [paymentMethod, setPaymentMethod] = useState('Efectivo')
   const [amountPaid, setAmountPaid] = useState('')
   const [processingSale, setProcessingSale] = useState(false)
+  const [confirmInvoiceOpen, setConfirmInvoiceOpen] = useState(false)
   const [lastReceipt, setLastReceipt] = useState(null)
 
   const [feedback, setFeedback] = useState(null)
@@ -478,6 +479,11 @@ export default function App() {
     () => Math.max(0, subtotal - Number(discount || 0)),
     [subtotal, discount]
   )
+  const amountPaidNow =
+    amountPaid === '' ? (paymentMethod === 'Credito' ? 0 : total) : parseFloat(amountPaid) || 0
+  const paymentStatus =
+    amountPaidNow >= total ? 'Pagada' : amountPaidNow > 0 ? 'Parcial' : 'Pendiente'
+  const pendingAmount = Math.max(0, total - amountPaidNow)
 
   const scrollToCheckout = () => {
     checkoutSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -486,17 +492,14 @@ export default function App() {
   // Process sale
   const handleCheckout = async (e) => {
     e.preventDefault()
+    if (processingSale || confirmInvoiceOpen) return
+
     if (cart.length === 0) {
       showToast('error', 'Agrega al menos un producto al carrito.')
       return
     }
 
-    const rawPaid =
-      amountPaid === '' ? (paymentMethod === 'Credito' ? 0 : total) : parseFloat(amountPaid) || 0
-    const estadoPago =
-      rawPaid >= total ? 'Pagada' : rawPaid > 0 ? 'Parcial' : 'Pendiente'
-
-    if (estadoPago !== 'Pagada' && !selectedClienteId && !customerName.trim()) {
+    if (paymentStatus !== 'Pagada' && !selectedClienteId && !customerName.trim()) {
       showToast(
         'error',
         'Para ventas a crédito o abono debes seleccionar o escribir el nombre del cliente.'
@@ -510,6 +513,33 @@ export default function App() {
       )
       return
     }
+
+    setProcessingSale(true)
+    try {
+      if (selectedClienteId) {
+        const { data: clienteActual, error: clienteErr } = await supabase
+          .from('clientes')
+          .select('activo')
+          .eq('id', selectedClienteId)
+          .maybeSingle()
+        if (clienteErr) throw clienteErr
+        if (!clienteActual || clienteActual.activo === false) {
+          setSelectedClienteId('')
+          showToast('error', 'Este cliente está inactivo y no se le puede facturar.')
+          return
+        }
+      }
+
+      setConfirmInvoiceOpen(true)
+    } catch (err) {
+      showToast('error', err.message || 'No se pudo validar el cliente.')
+    } finally {
+      setProcessingSale(false)
+    }
+  }
+
+  const handleConfirmInvoice = async () => {
+    if (processingSale) return
 
     setProcessingSale(true)
     try {
@@ -561,9 +591,9 @@ export default function App() {
             subtotal,
             descuento: Number(discount || 0),
             total,
-            monto_pagado: rawPaid,
+            monto_pagado: amountPaidNow,
             metodo_pago: paymentMethod,
-            estado_pago: estadoPago,
+            estado_pago: paymentStatus,
             notas: customerName.trim() ? `Cliente: ${customerName.trim()}` : 'Venta mostrador'
           }
         ])
@@ -606,11 +636,11 @@ export default function App() {
         ])
       }
 
-      if (rawPaid > 0 && estadoPago !== 'Pagada') {
+      if (amountPaidNow > 0 && paymentStatus !== 'Pagada') {
         await supabase.from('abonos').insert([
           {
             factura_id: factura.id,
-            monto: rawPaid,
+            monto: amountPaidNow,
             metodo_pago: paymentMethod === 'Credito' ? 'Efectivo' : paymentMethod
           }
         ])
@@ -632,12 +662,13 @@ export default function App() {
         subtotal,
         descuento: Number(discount || 0),
         total,
-        pagado: rawPaid,
-        pendiente: Math.max(0, total - rawPaid),
+        pagado: amountPaidNow,
+        pendiente: pendingAmount,
         metodoPago: paymentMethod,
-        estadoPago
+        estadoPago: paymentStatus
       })
 
+      setConfirmInvoiceOpen(false)
       setCart([])
       localStorage.removeItem(CART_STORAGE_KEY)
       setSelectedClienteId('')
@@ -865,6 +896,161 @@ export default function App() {
           >
             {feedback.message}
           </div>
+        </div>
+      )}
+
+      {confirmInvoiceOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4">
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="confirm-invoice-title"
+            className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl sm:p-6"
+          >
+            <div className="border-b border-slate-200 pb-3">
+              <h2 id="confirm-invoice-title" className="text-lg font-bold text-slate-900">
+                Confirmar Factura
+              </h2>
+              <p className="mt-1 text-xs text-slate-500">
+                Revisa los datos de la venta antes de registrarla.
+              </p>
+            </div>
+
+            {feedback?.type === 'error' && (
+              <p
+                role="alert"
+                className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700"
+              >
+                {feedback.message}
+              </p>
+            )}
+
+            <div className="mt-4 space-y-4">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-xl bg-slate-50 p-3">
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
+                    Cliente
+                  </p>
+                  <p className="mt-1 text-sm font-semibold text-slate-900">
+                    {customerName.trim() ||
+                      clienteSeleccionadoObj?.nombre ||
+                      'Cliente general / Contado'}
+                  </p>
+                  {(customerPhone || clienteSeleccionadoObj?.telefono) && (
+                    <p className="mt-0.5 text-xs text-slate-600">
+                      Teléfono: {customerPhone || clienteSeleccionadoObj?.telefono}
+                    </p>
+                  )}
+                </div>
+                <div className="rounded-xl bg-slate-50 p-3">
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
+                    Forma de pago
+                  </p>
+                  <span
+                    className={`mt-1 inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${
+                      paymentMethod === 'Credito'
+                        ? 'bg-amber-100 text-amber-800'
+                        : 'bg-emerald-100 text-emerald-800'
+                    }`}
+                  >
+                    {paymentMethod === 'Credito' ? 'Crédito / Fiado' : paymentMethod}
+                  </span>
+                  {(paymentMethod === 'Credito' || paymentStatus !== 'Pagada') && (
+                    <div className="mt-2 space-y-0.5 text-xs">
+                      <p className="text-slate-700">
+                        Abona ahora: {formatMoney(amountPaidNow)}
+                      </p>
+                      <p className="font-semibold text-amber-700">
+                        Pendiente: {formatMoney(pendingAmount)}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <h3 className="text-sm font-semibold text-slate-800">
+                    Artículos ({cartItemsCount})
+                  </h3>
+                  <span className="text-xs text-slate-500">
+                    {cartItemsCount} unidad{cartItemsCount === 1 ? '' : 'es'}
+                  </span>
+                </div>
+                <div className="max-h-48 divide-y divide-slate-100 overflow-y-auto rounded-xl border border-slate-200 px-3">
+                  {cart.map((item) => {
+                    const details = [
+                      item.variante.talla,
+                      item.variante.color,
+                      item.variante.presentacion
+                    ]
+                      .filter(Boolean)
+                      .join(' / ')
+                    const itemName = item.variante.productos?.nombre || 'Producto'
+                    const lineTotal =
+                      Number(item.variante.precio_venta || 0) * item.cantidad
+
+                    return (
+                      <div
+                        key={item.variante.id}
+                        className="flex items-start justify-between gap-3 py-2.5 text-xs"
+                      >
+                        <div className="min-w-0">
+                          <p className="font-medium text-slate-800">
+                            {item.cantidad} x {itemName}
+                            {details && (
+                              <span className="font-normal text-slate-500">
+                                {' '}({details})
+                              </span>
+                            )}
+                          </p>
+                        </div>
+                        <span className="shrink-0 font-semibold text-slate-700">
+                          {formatMoney(lineTotal)}
+                        </span>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+
+              <div className="space-y-1.5 border-t border-slate-200 pt-3 text-sm">
+                <div className="flex justify-between text-slate-600">
+                  <span>Subtotal</span>
+                  <span>{formatMoney(subtotal)}</span>
+                </div>
+                {Number(discount || 0) > 0 && (
+                  <div className="flex justify-between text-rose-700">
+                    <span>Descuento</span>
+                    <span>-{formatMoney(discount)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between border-t border-slate-100 pt-2 text-base font-bold text-slate-900">
+                  <span>Total final a cobrar</span>
+                  <span>{formatMoney(total)}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={() => setConfirmInvoiceOpen(false)}
+                disabled={processingSale}
+                className="rounded-xl bg-slate-100 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-200 disabled:opacity-50 sm:min-w-36"
+              >
+                Volver a editar
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmInvoice}
+                disabled={processingSale || cart.length === 0}
+                className="rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-50 sm:min-w-44"
+              >
+                {processingSale ? 'Procesando...' : 'Confirmar y Facturar'}
+              </button>
+            </div>
+          </section>
         </div>
       )}
 
@@ -1281,7 +1467,7 @@ export default function App() {
                     disabled={processingSale || cart.length === 0}
                     className="w-full rounded-xl bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white font-semibold py-3 text-sm transition cursor-pointer"
                   >
-                    {processingSale ? 'Procesando...' : 'Cobrar y Generar Recibo'}
+                    {processingSale ? 'Validando...' : 'Cobrar y Generar Recibo'}
                   </button>
                 </form> 
               </div>
